@@ -88,13 +88,4 @@ inline Language detectLanguage(const char *ofxLang) {
   return Language::EN;
 }
 
-inline Language detectLanguageFromProps(OfxPropertySetHandle props, const char *propName) {
-  if (!props || !propName) return detectLanguage(nullptr);
-  char *lang = nullptr;
-  if (gPropHost->propGetString(props, propName, 0, &lang) == kOfxStatOK && lang) {
-    return detectLanguage(lang);
-  }
-  return detectLanguage(nullptr);
-}
-
 } // namespace spektrafilm

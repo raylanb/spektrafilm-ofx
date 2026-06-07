@@ -4,6 +4,7 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
 #import <MetalPerformanceShaders/MetalPerformanceShaders.h>
+#import <objc/message.h>
 
 #include <algorithm>
 #include <array>
@@ -3046,7 +3047,7 @@ struct MetalRenderer::Impl {
     uint64_t frequency = 1000000000ull;
     if (@available(macOS 26.0, *)) {
       if ([device respondsToSelector:@selector(queryTimestampFrequency)]) {
-        const uint64_t queried = [device queryTimestampFrequency];
+        const uint64_t queried = ((uint64_t (*)(id, SEL))objc_msgSend)(device, @selector(queryTimestampFrequency));
         if (queried > 0ull) {
           frequency = queried;
         }
