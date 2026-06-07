@@ -114,7 +114,6 @@ if(SPEKTRAFILM_RELEASE_LTO AND (APPLE OR SPEKTRAFILM_USE_VULKAN))
 endif()
 
 if(APPLE)
-  find_package(PNG REQUIRED)
 elseif(SPEKTRAFILM_USE_VULKAN)
   if(_SPEKTRAFILM_VULKAN_SDK)
     list(PREPEND CMAKE_PREFIX_PATH "${_SPEKTRAFILM_VULKAN_SDK}")
@@ -883,6 +882,7 @@ if(APPLE)
     "${SPEKTRAFILM_PARITY_GENERATED_PROFILE_COUNTS}"
   )
 
+  find_package(PNG REQUIRED)
   add_executable(SpektraVariantGenerator
     tools/SpektraVariantGenerator.mm
     src/SpektraMetalRenderer.mm

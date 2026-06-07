@@ -1,0 +1,128 @@
+name: Build and Release
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+on:
+  push:
+    tags: ['v*']
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            name: macOS (Metal)
+            cmake-args: >-
+              -DCMAKE_BUILD_TYPE=Release
+              -DSPEKTRAFILM_RELEASE_LTO=ON
+              -DSPEKTRAFILM_METAL_OPTIMIZATION_LEVEL=-O3
+              -DSPEKTRAFILM_OFX_METAL_GPU_BUFFERS=ON
+            artifact-suffix: macos
+          - os: windows-2022
+            name: Windows (Vulkan)
+            cmake-args: -G "Visual Studio 17 2022" -A x64
+            artifact-suffix: windows
+          - os: ubuntu-22.04
+            name: Linux (Vulkan)
+            cmake-args: -DCMAKE_BUILD_TYPE=Release
+            artifact-suffix: linux
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install numpy scipy colour-science
+
+      - name: Setup OpenFX SDK
+        shell: bash
+        run: |
+          mkdir -p third_party/openfx
+          curl -sL https://github.com/AcademySoftwareFoundation/OpenFX/archive/refs/tags/OFX_Release_1.5.1.tar.gz | tar xz -C third_party/openfx --strip-components=1
+
+      - name: Install Windows dependencies
+        if: runner.os == 'Windows'
+        run: |
+          choco install vulkan-sdk -y --no-progress
+          if (Test-Path "C:\VulkanSDK") {
+            $version = Get-ChildItem "C:\VulkanSDK" | Select-Object -First 1 -ExpandProperty Name
+            "VULKAN_SDK=C:\VulkanSDK\$version" | Out-File -Append $env:GITHUB_ENV
+          }
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev glslang-tools
+
+      - name: Configure CMake
+        run: cmake -S . -B build ${{ matrix.cmake-args }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel --target spektrafilm spektrafilm_flow
+
+      - name: Upload spektrafilm bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: spektrafilm-${{ matrix.artifact-suffix }}
+          path: build/spektrafilm.ofx.bundle/
+          if-no-files-found: error
+
+      - name: Upload spektrafilm_flow bundle
+        uses: actions/upload-artifact@v7
+        with:
+          name: spektrafilm_flow-${{ matrix.artifact-suffix }}
+          path: build/spektrafilm_flow.ofx.bundle/
+          if-no-files-found: error
+
+  release:
+    name: Create Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Create platform archives
+        shell: bash
+        run: |
+          set -e
+          for plugin in spektrafilm spektrafilm_flow; do
+            for platform in macos windows linux; do
+              dir="artifacts/${plugin}-${platform}"
+              if [ -d "$dir" ]; then
+                (cd "$dir" && zip -r "../../${plugin}-${platform}.zip" .)
+                echo "Created ${plugin}-${platform}.zip"
+              fi
+            done
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            spektrafilm-macos.zip
+            spektrafilm_flow-macos.zip
+            spektrafilm-windows.zip
+            spektrafilm_flow-windows.zip
+            spektrafilm-linux.zip
+            spektrafilm_flow-linux.zip
+          generate_release_notes: true

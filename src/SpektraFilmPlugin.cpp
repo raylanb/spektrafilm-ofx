@@ -89,6 +89,16 @@
 
 namespace {
 
+// OFX language support properties (not in OFX 1.5.1 spec; supported by DaVinci Resolve and other hosts)
+#ifndef kOfxImageEffectPropCurrentLanguage
+#  define kOfxImageEffectPropCurrentLanguage "OfxImageEffectPropCurrentLanguage"
+#endif
+#ifndef kOfxImageEffectPropSupportedLanguages
+#  define kOfxImageEffectPropSupportedLanguages "OfxImageEffectPropSupportedLanguages"
+#endif
+
+using namespace spektrafilm;
+
 constexpr const char *kPluginIdentifier = SPEKTRAFILM_PLUGIN_IDENTIFIER;
 constexpr const char *kPluginLabel = SPEKTRAFILM_PLUGIN_LABEL;
 constexpr int kPluginVersionMajor = 0;
@@ -100,6 +110,15 @@ OfxPropertySuiteV1 *gPropHost = nullptr;
 OfxParameterSuiteV1 *gParamHost = nullptr;
 OfxMessageSuiteV1 *gMessageHost = nullptr;
 int gPluginImageAnchor = 0;
+
+Language detectLanguageFromProps(OfxPropertySetHandle props, const char *propName) {
+  if (!props || !propName) return detectLanguage(nullptr);
+  char *lang = nullptr;
+  if (gPropHost->propGetString(props, propName, 0, &lang) == kOfxStatOK && lang) {
+    return detectLanguage(lang);
+  }
+  return detectLanguage(nullptr);
+}
 
 enum class PluginFlavor : int32_t {
   Flow = 0,
