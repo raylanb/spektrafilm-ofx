@@ -1,6 +1,7 @@
 #include "SpektraParameters.h"
 #include "SpektraProfileCurves.h"
 #include "SpektraRenderer.h"
+#include "SpektraLang.h"
 #if defined __APPLE__
 #  include "SpektraMetalRenderer.h"
 #endif
@@ -3125,7 +3126,7 @@ std::filesystem::path bundledUserManualPath() {
 bool openBundledUserManual(std::string &error) {
   const std::filesystem::path manualPath = bundledUserManualPath();
   if (manualPath.empty() || !std::filesystem::is_regular_file(manualPath)) {
-    error = "Could not find manual.pdf in the OFX bundle resources.";
+    error = tr("message.manualNotFound");
     return false;
   }
 
@@ -4135,7 +4136,7 @@ OfxStatus instanceChanged(OfxImageEffectHandle effect, OfxPropertySetHandle inAr
       if (copyVisibleParams(paramSet, time, error)) {
         return kOfxStatOK;
       }
-      showMessage(effect, kOfxMessageError, "spektrafilmDefaults", error.empty() ? "Could not copy spektrafilm params." : error);
+      showMessage(effect, kOfxMessageError, "spektrafilmDefaults", error.empty() ? tr("message.copyFailed") : error);
       return kOfxStatFailed;
     }
     if (pasteParamsChanged) {
@@ -4144,19 +4145,19 @@ OfxStatus instanceChanged(OfxImageEffectHandle effect, OfxPropertySetHandle inAr
       std::string error;
       std::string clipboardText;
       if (!readTextFromClipboard(clipboardText, copyFound, error)) {
-        showMessage(effect, kOfxMessageError, "spektrafilmDefaults", error.empty() ? "Could not read copied spektrafilm params." : error);
+        showMessage(effect, kOfxMessageError, "spektrafilmDefaults", error.empty() ? tr("message.pasteReadFailed") : error);
         return kOfxStatFailed;
       }
       if (!copyFound) {
-        showMessage(effect, kOfxMessageWarning, "spektrafilmDefaults", "No copied spektrafilm params found.");
+        showMessage(effect, kOfxMessageWarning, "spektrafilmDefaults", tr("message.pasteEmpty"));
         return kOfxStatReplyDefault;
       }
       obfuscateDefaultsText(clipboardText);
       if (!decodeDefaultsSnapshot(clipboardText, copiedParams)) {
-        showMessage(effect, kOfxMessageWarning, "spektrafilmDefaults", "Clipboard does not contain spektrafilm params.");
+        showMessage(effect, kOfxMessageWarning, "spektrafilmDefaults", tr("message.pasteInvalid"));
         return kOfxStatReplyDefault;
       }
-      gParamHost->paramEditBegin(paramSet, "Paste spektrafilm params");
+      gParamHost->paramEditBegin(paramSet, tr("label.pasteUndo"));
       applySnapshotToParamSet(paramSet, copiedParams);
       gParamHost->paramEditEnd(paramSet);
       syncConditionalParamVisibility(data);
@@ -4165,10 +4166,10 @@ OfxStatus instanceChanged(OfxImageEffectHandle effect, OfxPropertySetHandle inAr
     if (saveDefaultsChanged) {
       std::string error;
       if (saveVisibleDefaults(paramSet, time, error)) {
-        showMessage(effect, kOfxMessageMessage, "spektrafilmDefaults", "spektrafilm defaults saved successfully.");
+        showMessage(effect, kOfxMessageMessage, "spektrafilmDefaults", tr("message.saveSuccess"));
         return kOfxStatOK;
       }
-      showMessage(effect, kOfxMessageError, "spektrafilmDefaults", error.empty() ? "Could not save spektrafilm defaults." : error);
+      showMessage(effect, kOfxMessageError, "spektrafilmDefaults", error.empty() ? tr("message.defaultsSaveFailed") : error);
       return kOfxStatFailed;
     }
     if (savePresetChanged) {
@@ -4231,12 +4232,23 @@ OfxStatus instanceChanged(OfxImageEffectHandle effect, OfxPropertySetHandle inAr
       std::vector<std::string> disabledEffects;
       std::string error;
       if (!exportCurrentLut(data, time, path, disabledEffects, error)) {
-        showMessage(effect, kOfxMessageError, "spektrafilmLutExport", error.empty() ? "Could not export spektrafilm LUT." : error);
+        showMessage(effect, kOfxMessageError, "spektrafilmLutExport", error.empty() ? tr("message.exportFailed") : error);
         return kOfxStatFailed;
       }
-      std::string message = "spektrafilm LUT exported: " + path.string();
+      std::string message = tr("message.lutExported");
+      {
+        size_t pos = message.find("{path}");
+        if (pos != std::string::npos) {
+          message.replace(pos, 6, path.string());
+        }
+      }
       if (!disabledEffects.empty()) {
-        message += "\n\nThis LUT contains the color-only spectral transform. Disabled for export: " + joinLabels(disabledEffects) + ".";
+        std::string disabledMsg = tr("message.lutExportedDisabled");
+        size_t pos = disabledMsg.find("{effects}");
+        if (pos != std::string::npos) {
+          disabledMsg.replace(pos, 9, joinLabels(disabledEffects));
+        }
+        message += "\n\n" + disabledMsg;
         showMessage(effect, kOfxMessageWarning, "spektrafilmLutExport", message);
       } else {
         showMessage(effect, kOfxMessageMessage, "spektrafilmLutExport", message);
@@ -4248,7 +4260,7 @@ OfxStatus instanceChanged(OfxImageEffectHandle effect, OfxPropertySetHandle inAr
       if (openBundledUserManual(error)) {
         return kOfxStatOK;
       }
-      showMessage(effect, kOfxMessageError, "spektrafilmUserManual", error.empty() ? "Could not open the spektrafilm user manual." : error);
+      showMessage(effect, kOfxMessageError, "spektrafilmUserManual", error.empty() ? tr("message.manualOpenFailed") : error);
       return kOfxStatFailed;
     }
     std::string error;
@@ -4257,18 +4269,18 @@ OfxStatus instanceChanged(OfxImageEffectHandle effect, OfxPropertySetHandle inAr
         effect,
         kOfxMessageError,
         "spektrafilmDefaults",
-        error.empty() ? "Could not delete spektrafilm defaults file." : error
+        error.empty() ? tr("message.defaultsDeleteFailed") : error
       );
       return kOfxStatFailed;
     }
-    gParamHost->paramEditBegin(paramSet, "Reset spektrafilm factory defaults");
+    gParamHost->paramEditBegin(paramSet, tr("label.resetUndo"));
     resetParamSetToFactory(paramSet);
     if (dirUsesStockCalibration(data)) {
       applyDirStockCalibration(data, false);
     }
     gParamHost->paramEditEnd(paramSet);
     syncConditionalParamVisibility(data);
-    showMessage(effect, kOfxMessageMessage, "spektrafilmDefaults", "spektrafilm factory defaults restored.");
+    showMessage(effect, kOfxMessageMessage, "spektrafilmDefaults", tr("message.factoryDefaultsRestored"));
     return kOfxStatOK;
   }
 
@@ -4885,25 +4897,25 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
     gDescribeDefaults = &savedDefaults;
   }
 
-  defineGroup(paramSet, "colorGroup", "Color Management", true);
-  defineGroup(paramSet, "filteringGroup", "Filtering", false);
-  defineGroup(paramSet, "enlargerGroup", "Film Plane", false);
-  defineGroup(paramSet, "filmGroup", "Film", true);
-  defineGroup(paramSet, "printGroup", "Print", true);
-  defineGroup(paramSet, "couplerGroup", "DIR Couplers", false);
-  defineGroup(paramSet, "grainGroup", "Grain", true);
-  defineGroup(paramSet, "grainSynthesisGroup", "Grain Synthesis", false);
-  defineGroup(paramSet, "halationGroup", "Halation", false);
-  defineGroup(paramSet, "diffusionGroup", "Diffusion", false);
-  defineGroup(paramSet, "scannerGroup", "Scanner", false);
-  defineGroup(paramSet, "infoGroup", "Info", false);
-  defineGroup(paramSet, "manageGroup", "Manage", false);
+  defineGroup(paramSet, "colorGroup", tr("group.color"), true);
+  defineGroup(paramSet, "filteringGroup", tr("group.filtering"), false);
+  defineGroup(paramSet, "enlargerGroup", tr("group.enlarger"), false);
+  defineGroup(paramSet, "filmGroup", tr("group.film"), true);
+  defineGroup(paramSet, "printGroup", tr("group.print"), true);
+  defineGroup(paramSet, "couplerGroup", tr("group.coupler"), false);
+  defineGroup(paramSet, "grainGroup", tr("group.grain"), true);
+  defineGroup(paramSet, "grainSynthesisGroup", tr("group.grainSynthesis"), false);
+  defineGroup(paramSet, "halationGroup", tr("group.halation"), false);
+  defineGroup(paramSet, "diffusionGroup", tr("group.diffusion"), false);
+  defineGroup(paramSet, "scannerGroup", tr("group.scanner"), false);
+  defineGroup(paramSet, "infoGroup", tr("group.info"), false);
+  defineGroup(paramSet, "manageGroup", tr("group.manage"), false);
 
-  const char *processOptions[] = {"Print simulation", "Scan negative", "Process negative"};
-  defineChoice(paramSet, "process", "Mode", processOptions, 3, 0, "colorGroup");
+  const char *processOptions[] = {tr("choice.process.printSimulation"), "Scan negative", "Process negative"};
+  defineChoice(paramSet, "process", tr("param.process"), processOptions, 3, 0, "colorGroup");
   defineBool(paramSet, "scanNegativeInvert", "Invert Negative Scan", false, "colorGroup");
-  const char *rgbToRawOptions[] = {"Hanatos 2026", "Hanatos 2025", "Mallett 2019"};
-  defineChoice(paramSet, "rgbToRawMethod", "RGB to Raw", rgbToRawOptions, 3, 0, "filmGroup");
+  const char *rgbToRawOptions[] = {tr("choice.rgbToRaw.hanatos2026"), tr("choice.rgbToRaw.hanatos2025"), tr("choice.rgbToRaw.mallett2019")};
+  defineChoice(paramSet, "rgbToRawMethod", tr("param.rgbToRawMethod"), rgbToRawOptions, 3, 0, "filmGroup");
   const char *colorSpaces[] = {
     "ARRI LogC4",
     "ARRI LogC3 EI800",
@@ -4964,30 +4976,30 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
     "Rec.709 Gamma 2.2",
     "Rec.709 Gamma 2.4"
   };
-  defineChoice(paramSet, "inputColorSpace", "Input Color Space", colorSpaces, static_cast<int>(sizeof(colorSpaces) / sizeof(colorSpaces[0])), 0, "colorGroup");
+  defineChoice(paramSet, "inputColorSpace", tr("param.inputColorSpace"), colorSpaces, static_cast<int>(sizeof(colorSpaces) / sizeof(colorSpaces[0])), 0, "colorGroup");
   defineChoice(paramSet, "rcmInputColorSpace", "Input Color Space", rcmInputColorSpaces, static_cast<int>(sizeof(rcmInputColorSpaces) / sizeof(rcmInputColorSpaces[0])), 0, "colorGroup");
-  const char *outputRoles[] = {"Display Out SDR", "Display Out HDR", "RCM/ACES (Beta)"};
-  defineChoice(paramSet, "outputRole", "Output Role", outputRoles, outputRoleOptionCountForFlavor(), 0, "colorGroup");
-  defineChoice(paramSet, "sdrOutputColorSpace", "Output Color Space", sdrOutputColorSpaces, static_cast<int>(sizeof(sdrOutputColorSpaces) / sizeof(sdrOutputColorSpaces[0])), 8, "colorGroup");
-  defineChoice(paramSet, "sceneOutputColorSpace", "Output Color Space", sceneOutputColorSpaces, static_cast<int>(sizeof(sceneOutputColorSpaces) / sizeof(sceneOutputColorSpaces[0])), 0, "colorGroup");
-  const char *hdrPresets[] = {"PQ 1000", "PQ 4000", "HLG 1000", "Custom"};
-  defineChoice(paramSet, "hdrPreset", "HDR Preset", hdrPresets, 4, 0, "colorGroup");
-  const char *hdrTransfers[] = {"Rec.2100 ST2084 (PQ)", "Rec.2100 HLG"};
-  defineChoice(paramSet, "hdrTransfer", "HDR Transfer", hdrTransfers, 2, 0, "colorGroup");
-  defineDouble(paramSet, "hdrReferenceWhiteNits", "Reference White Nits", 203.0, 48.0, 1000.0, "colorGroup");
-  defineDouble(paramSet, "hdrPeakNits", "Peak Nits", 1000.0, 100.0, 10000.0, "colorGroup");
-  defineDouble(paramSet, "hdrExposureEv", "HDR Exposure EV", 0.0, -8.0, 8.0, "colorGroup");
-  const char *hdrToneMappings[] = {"Soft Rolloff", "Hard Clip"};
-  defineChoice(paramSet, "hdrToneMapping", "HDR Tone Mapping", hdrToneMappings, 2, 1, "colorGroup");
-  defineBool(paramSet, "colorAdaptation", "Color Adaptation", false, "colorGroup");
-  defineBool(paramSet, "colorAdaptationInputCompression", "Input Compression", true, "colorGroup");
-  defineBool(paramSet, "colorAdaptationCurveSmoothing", "Curve Smoothing", true, "colorGroup");
-  defineBool(paramSet, "colorAdaptationOutputLightnessCompression", "Output Lightness Compression", true, "colorGroup");
-  defineBool(paramSet, "colorAdaptationOutputChromaCompression", "Output Chroma Compression", true, "colorGroup");
-  defineBool(paramSet, "cameraUvFilterEnabled", "Filter UV", false, "filteringGroup");
-  defineDouble(paramSet, "cameraUvCutNm", "UV Cut nm", 410.0, 380.0, 450.0, "filteringGroup");
-  defineBool(paramSet, "cameraIrFilterEnabled", "Filter IR", false, "filteringGroup");
-  defineDouble(paramSet, "cameraIrCutNm", "IR Cut nm", 675.0, 600.0, 780.0, "filteringGroup");
+  const char *outputRoles[] = {tr("choice.outputRole.displaySdr"), tr("choice.outputRole.displayHdr"), "RCM/ACES (Beta)"};
+  defineChoice(paramSet, "outputRole", tr("param.outputRole"), outputRoles, outputRoleOptionCountForFlavor(), 0, "colorGroup");
+  defineChoice(paramSet, "sdrOutputColorSpace", tr("param.sdrOutputColorSpace"), sdrOutputColorSpaces, static_cast<int>(sizeof(sdrOutputColorSpaces) / sizeof(sdrOutputColorSpaces[0])), 8, "colorGroup");
+  defineChoice(paramSet, "sceneOutputColorSpace", tr("param.sceneOutputColorSpace"), sceneOutputColorSpaces, static_cast<int>(sizeof(sceneOutputColorSpaces) / sizeof(sceneOutputColorSpaces[0])), 0, "colorGroup");
+  const char *hdrPresets[] = {tr("choice.hdrPreset.pq1000"), tr("choice.hdrPreset.pq4000"), tr("choice.hdrPreset.hlg1000"), tr("choice.hdrPreset.custom")};
+  defineChoice(paramSet, "hdrPreset", tr("param.hdrPreset"), hdrPresets, 4, 0, "colorGroup");
+  const char *hdrTransfers[] = {tr("choice.hdrTransfer.pq"), tr("choice.hdrTransfer.hlg")};
+  defineChoice(paramSet, "hdrTransfer", tr("param.hdrTransfer"), hdrTransfers, 2, 0, "colorGroup");
+  defineDouble(paramSet, "hdrReferenceWhiteNits", tr("param.hdrReferenceWhiteNits"), 203.0, 48.0, 1000.0, "colorGroup");
+  defineDouble(paramSet, "hdrPeakNits", tr("param.hdrPeakNits"), 1000.0, 100.0, 10000.0, "colorGroup");
+  defineDouble(paramSet, "hdrExposureEv", tr("param.hdrExposureEv"), 0.0, -8.0, 8.0, "colorGroup");
+  const char *hdrToneMappings[] = {tr("choice.hdrToneMapping.softRolloff"), tr("choice.hdrToneMapping.hardClip")};
+  defineChoice(paramSet, "hdrToneMapping", tr("param.hdrToneMapping"), hdrToneMappings, 2, 1, "colorGroup");
+  defineBool(paramSet, "colorAdaptation", tr("param.colorAdaptation"), false, "colorGroup");
+  defineBool(paramSet, "colorAdaptationInputCompression", tr("param.colorAdaptationInputCompression"), true, "colorGroup");
+  defineBool(paramSet, "colorAdaptationCurveSmoothing", tr("param.colorAdaptationCurveSmoothing"), true, "colorGroup");
+  defineBool(paramSet, "colorAdaptationOutputLightnessCompression", tr("param.colorAdaptationOutputLightnessCompression"), true, "colorGroup");
+  defineBool(paramSet, "colorAdaptationOutputChromaCompression", tr("param.colorAdaptationOutputChromaCompression"), true, "colorGroup");
+  defineBool(paramSet, "cameraUvFilterEnabled", tr("param.cameraUvFilterEnabled"), false, "filteringGroup");
+  defineDouble(paramSet, "cameraUvCutNm", tr("param.cameraUvCutNm"), 410.0, 380.0, 450.0, "filteringGroup");
+  defineBool(paramSet, "cameraIrFilterEnabled", tr("param.cameraIrFilterEnabled"), false, "filteringGroup");
+  defineDouble(paramSet, "cameraIrCutNm", tr("param.cameraIrCutNm"), 675.0, 600.0, 780.0, "filteringGroup");
 
   std::vector<const char *> films;
   films.reserve(spektrafilm::kSpektraFilmCount);
@@ -4995,14 +5007,14 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
     const spektrafilm::ProfileCurveSet *profile = spektrafilm::filmProfileCurves(static_cast<int32_t>(i));
     films.push_back(profile && profile->name ? profile->name : "Unknown Film");
   }
-  defineChoice(paramSet, "film", "Stock", films.data(), static_cast<int>(films.size()), static_cast<int>(spektrafilm::kSpektraDefaultFilmIndex), "filmGroup");
-  const char *filmFormats[] = {"8mm", "Super 8", "16mm", "Super 16", "35mm", "Super 35", "65mm", "70mm / IMAX"};
-  defineChoice(paramSet, "filmFormat", "Film Format", filmFormats, static_cast<int>(sizeof(filmFormats) / sizeof(filmFormats[0])), 4, "filmGroup");
-  const char *pushPullModes[] = {"Standard", "Experimental"};
-  defineChoice(paramSet, "filmPushPullMode", "Push / Pull Mode", pushPullModes, 2, 0, "filmGroup");
-  defineDouble(paramSet, "filmPushPullStops", "Film Push / Pull Stops", 0.0, -2.0, 2.0, "filmGroup");
-  defineDouble(paramSet, "negativeBleachBypassAmount", "Negative Bleach Bypass", 0.0, 0.0, 1.0, "filmGroup");
-  defineDouble(paramSet, "negativeLeucoCyanCoupling", "Leuco-Cyan Coupling", 1.0, 0.0, 2.0, "filmGroup");
+  defineChoice(paramSet, "film", tr("param.film"), films.data(), static_cast<int>(films.size()), static_cast<int>(spektrafilm::kSpektraDefaultFilmIndex), "filmGroup");
+  const char *filmFormats[] = {tr("choice.filmFormat.standard8"), tr("choice.filmFormat.super8"), tr("choice.filmFormat.standard16"), tr("choice.filmFormat.super16"), tr("choice.filmFormat.standard35"), tr("choice.filmFormat.super35"), tr("choice.filmFormat.standard65"), tr("choice.filmFormat.imax70")};
+  defineChoice(paramSet, "filmFormat", tr("param.filmFormat"), filmFormats, static_cast<int>(sizeof(filmFormats) / sizeof(filmFormats[0])), 4, "filmGroup");
+  const char *pushPullModes[] = {tr("choice.pushPull.standard"), tr("choice.pushPull.experimental")};
+  defineChoice(paramSet, "filmPushPullMode", tr("param.filmPushPullMode"), pushPullModes, 2, 0, "filmGroup");
+  defineDouble(paramSet, "filmPushPullStops", tr("param.filmPushPullStops"), 0.0, -2.0, 2.0, "filmGroup");
+  defineDouble(paramSet, "negativeBleachBypassAmount", tr("param.negativeBleachBypassAmount"), 0.0, 0.0, 1.0, "filmGroup");
+  defineDouble(paramSet, "negativeLeucoCyanCoupling", tr("param.negativeLeucoCyanCoupling"), 1.0, 0.0, 2.0, "filmGroup");
 
   std::vector<const char *> papers;
   papers.reserve(spektrafilm::kSpektraPaperCount);
@@ -5010,141 +5022,141 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
     const spektrafilm::ProfileCurveSet *profile = spektrafilm::paperProfileCurves(static_cast<int32_t>(i));
     papers.push_back(profile && profile->name ? profile->name : "Unknown Paper");
   }
-  defineChoice(paramSet, "paper", "Paper", papers.data(), static_cast<int>(papers.size()), static_cast<int>(spektrafilm::kSpektraDefaultPaperIndex), "printGroup");
+  defineChoice(paramSet, "paper", tr("param.paper"), papers.data(), static_cast<int>(papers.size()), static_cast<int>(spektrafilm::kSpektraDefaultPaperIndex), "printGroup");
   if constexpr (spektrafilm::kSpektraAcademyPrinterDensityEnabled) {
-    const char *printTimingModes[] = {"Filtered Enlarger", "Printer Density"};
-    defineChoice(paramSet, "printTiming", "Print Timing", printTimingModes, 2, 0, "printGroup");
+    const char *printTimingModes[] = {tr("choice.printTiming.filteredEnlarger"), tr("choice.printTiming.apd")};
+    defineChoice(paramSet, "printTiming", tr("param.printTiming"), printTimingModes, 2, 0, "printGroup");
   } else {
-    const char *printTimingModes[] = {"Filtered Enlarger"};
-    defineChoice(paramSet, "printTiming", "Print Timing", printTimingModes, 1, 0, "printGroup");
+    const char *printTimingModes[] = {tr("choice.printTiming.filteredEnlarger")};
+    defineChoice(paramSet, "printTiming", tr("param.printTiming"), printTimingModes, 1, 0, "printGroup");
   }
-  defineDouble(paramSet, "printPushPullStops", "Print Push / Pull Stops", 0.0, -2.0, 2.0, "printGroup");
-  defineDouble(paramSet, "printBleachBypassAmount", "Print Bleach Bypass", 0.0, 0.0, 1.0, "printGroup");
+  defineDouble(paramSet, "printPushPullStops", tr("param.printPushPullStops"), 0.0, -2.0, 2.0, "printGroup");
+  defineDouble(paramSet, "printBleachBypassAmount", tr("param.printBleachBypassAmount"), 0.0, 0.0, 1.0, "printGroup");
 
-  defineDouble(paramSet, "filmExposureEv", "Exposure EV", 0.0, -8.0, 8.0, "filmGroup");
-  defineBool(paramSet, "autoExposure", "Auto Exposure", false, "filmGroup");
-  const char *autoExposureMethods[] = {"Center weighted", "Median"};
-  defineChoice(paramSet, "autoExposureMethod", "Auto Exposure Meter", autoExposureMethods, 2, 0, "filmGroup");
-  defineDouble(paramSet, "filmGamma", "Gamma", 1.0, 0.1, 2.0, "filmGroup");
-  defineDouble(paramSet, "printExposureEv", "Exposure EV", 0.0, -5.0, 5.0, "printGroup");
-  defineDouble(paramSet, "printGamma", "Gamma", 1.0, 0.1, 2.0, "printGroup");
-  defineDouble(paramSet, "printShadowShape", "Shadow Shape", 0.0, -1.0, 1.0, "printGroup");
-  defineDouble(paramSet, "printHighlightShape", "Highlight Shape", 0.0, -1.0, 1.0, "printGroup");
-  defineDouble(paramSet, "filterC", "C Filter", 0.0, 0.0, 120.0, "printGroup");
-  defineDouble(paramSet, "filterMShift", "M Filter Shift", 0.0, -60.0, 60.0, "printGroup");
-  defineDouble(paramSet, "filterYShift", "Y Filter Shift", 0.0, -60.0, 60.0, "printGroup");
-  defineDouble(paramSet, "enlargerScale", "Scale", 1.0, 1.0, 32.0, "enlargerGroup");
-  defineDouble(paramSet, "enlargerOffsetXPercent", "Offset X %", 0.0, -100.0, 100.0, "enlargerGroup");
-  defineDouble(paramSet, "enlargerOffsetYPercent", "Offset Y %", 0.0, -100.0, 100.0, "enlargerGroup");
-  defineDouble(paramSet, "preflashExposure", "Preflash Exposure", 0.0, 0.0, 1.0, "printGroup");
-  defineDouble(paramSet, "preflashMFilterShift", "Preflash M Filter Shift", 0.0, -60.0, 60.0, "printGroup");
-  defineDouble(paramSet, "preflashYFilterShift", "Preflash Y Filter Shift", 0.0, -60.0, 60.0, "printGroup");
+  defineDouble(paramSet, "filmExposureEv", tr("param.filmExposureEv"), 0.0, -8.0, 8.0, "filmGroup");
+  defineBool(paramSet, "autoExposure", tr("param.autoExposure"), false, "filmGroup");
+  const char *autoExposureMethods[] = {tr("choice.autoExposure.centerWeighted"), tr("choice.autoExposure.median")};
+  defineChoice(paramSet, "autoExposureMethod", tr("param.autoExposureMethod"), autoExposureMethods, 2, 0, "filmGroup");
+  defineDouble(paramSet, "filmGamma", tr("param.filmGamma"), 1.0, 0.1, 2.0, "filmGroup");
+  defineDouble(paramSet, "printExposureEv", tr("param.printExposureEv"), 0.0, -5.0, 5.0, "printGroup");
+  defineDouble(paramSet, "printGamma", tr("param.printGamma"), 1.0, 0.1, 2.0, "printGroup");
+  defineDouble(paramSet, "printShadowShape", tr("param.printShadowShape"), 0.0, -1.0, 1.0, "printGroup");
+  defineDouble(paramSet, "printHighlightShape", tr("param.printHighlightShape"), 0.0, -1.0, 1.0, "printGroup");
+  defineDouble(paramSet, "filterC", tr("param.filterC"), 0.0, 0.0, 120.0, "printGroup");
+  defineDouble(paramSet, "filterMShift", tr("param.filterMShift"), 0.0, -60.0, 60.0, "printGroup");
+  defineDouble(paramSet, "filterYShift", tr("param.filterYShift"), 0.0, -60.0, 60.0, "printGroup");
+  defineDouble(paramSet, "enlargerScale", tr("param.enlargerScale"), 1.0, 1.0, 32.0, "enlargerGroup");
+  defineDouble(paramSet, "enlargerOffsetXPercent", tr("param.enlargerOffsetXPercent"), 0.0, -100.0, 100.0, "enlargerGroup");
+  defineDouble(paramSet, "enlargerOffsetYPercent", tr("param.enlargerOffsetYPercent"), 0.0, -100.0, 100.0, "enlargerGroup");
+  defineDouble(paramSet, "preflashExposure", tr("param.preflashExposure"), 0.0, 0.0, 1.0, "printGroup");
+  defineDouble(paramSet, "preflashMFilterShift", tr("param.preflashMFilterShift"), 0.0, -60.0, 60.0, "printGroup");
+  defineDouble(paramSet, "preflashYFilterShift", tr("param.preflashYFilterShift"), 0.0, -60.0, 60.0, "printGroup");
   if constexpr (spektrafilm::kSpektraAcademyPrinterDensityEnabled) {
-    defineBool(paramSet, "printerLightsGang", "Gang Printer Points", false, "printGroup");
-    defineBool(paramSet, "printerLightsGroup", "Group Printer Points", false, "printGroup");
-    defineDouble(paramSet, "printerLightR", "Printer Point R", 0.0, -24.0, 24.0, "printGroup");
-    defineDouble(paramSet, "printerLightG", "Printer Point G", 0.0, -24.0, 24.0, "printGroup");
-    defineDouble(paramSet, "printerLightB", "Printer Point B", 0.0, -24.0, 24.0, "printGroup");
-    defineBool(paramSet, "printerLightCalibration", "Printer Point Calibration", true, "printGroup");
+    defineBool(paramSet, "printerLightsGang", tr("param.printerLightsGang"), false, "printGroup");
+    defineBool(paramSet, "printerLightsGroup", tr("param.printerLightsGroup"), false, "printGroup");
+    defineDouble(paramSet, "printerLightR", tr("param.printerLightR"), 0.0, -24.0, 24.0, "printGroup");
+    defineDouble(paramSet, "printerLightG", tr("param.printerLightG"), 0.0, -24.0, 24.0, "printGroup");
+    defineDouble(paramSet, "printerLightB", tr("param.printerLightB"), 0.0, -24.0, 24.0, "printGroup");
+    defineBool(paramSet, "printerLightCalibration", tr("param.printerLightCalibration"), true, "printGroup");
   }
-  defineDouble(paramSet, "dirAmount", "Amount", 0.0, 0.0, 2.0, "couplerGroup");
-  defineDouble(paramSet, "dirDiffusionUm", "Diffusion um", 20.0, 0.0, 100.0, "couplerGroup");
-  defineDouble(paramSet, "dirDiffusionTailUm", "Tail um", 200.0, 0.0, 1000.0, "couplerGroup");
-  defineDouble(paramSet, "dirDiffusionTailWeight", "Tail Weight", 0.06, 0.0, 1.0, "couplerGroup");
-  defineDouble(paramSet, "dirInhibitionSameLayer", "Same-Layer Inhibition", 1.0, 0.0, 2.0, "couplerGroup");
-  defineDouble(paramSet, "dirInhibitionInterlayer", "Interlayer Inhibition", 1.0, 0.0, 2.0, "couplerGroup");
-  defineDouble3DRange(paramSet, "dirGammaSameLayerRgb", "Same-Layer Gamma RGB", 0.336, 0.319, 0.273, 0.0, 1.0, "couplerGroup");
-  defineDouble2DRange(paramSet, "dirGammaRToGb", "R -> G/B Gamma", 0.353, 0.302, 0.0, 1.0, "couplerGroup");
-  defineDouble2DRange(paramSet, "dirGammaGToRb", "G -> R/B Gamma", 0.154, 0.353, 0.0, 1.0, "couplerGroup");
-  defineDouble2DRange(paramSet, "dirGammaBToRg", "B -> R/G Gamma", 0.168, 0.226, 0.0, 1.0, "couplerGroup");
-  definePushButton(paramSet, "dirCalibrateToStock", "Calibrate to Stock", "couplerGroup");
+  defineDouble(paramSet, "dirAmount", tr("param.dirAmount"), 0.0, 0.0, 2.0, "couplerGroup");
+  defineDouble(paramSet, "dirDiffusionUm", tr("param.dirDiffusionUm"), 20.0, 0.0, 100.0, "couplerGroup");
+  defineDouble(paramSet, "dirDiffusionTailUm", tr("param.dirDiffusionTailUm"), 200.0, 0.0, 1000.0, "couplerGroup");
+  defineDouble(paramSet, "dirDiffusionTailWeight", tr("param.dirDiffusionTailWeight"), 0.06, 0.0, 1.0, "couplerGroup");
+  defineDouble(paramSet, "dirInhibitionSameLayer", tr("param.dirInhibitionSameLayer"), 1.0, 0.0, 2.0, "couplerGroup");
+  defineDouble(paramSet, "dirInhibitionInterlayer", tr("param.dirInhibitionInterlayer"), 1.0, 0.0, 2.0, "couplerGroup");
+  defineDouble3DRange(paramSet, "dirGammaSameLayerRgb", tr("param.dirGammaSameLayerRgb"), 0.336, 0.319, 0.273, 0.0, 1.0, "couplerGroup");
+  defineDouble2DRange(paramSet, "dirGammaRToGb", tr("param.dirGammaRToGb"), 0.353, 0.302, 0.0, 1.0, "couplerGroup");
+  defineDouble2DRange(paramSet, "dirGammaGToRb", tr("param.dirGammaGToRb"), 0.154, 0.353, 0.0, 1.0, "couplerGroup");
+  defineDouble2DRange(paramSet, "dirGammaBToRg", tr("param.dirGammaBToRg"), 0.168, 0.226, 0.0, 1.0, "couplerGroup");
+  definePushButton(paramSet, "dirCalibrateToStock", tr("param.dirCalibrateToStock"), "couplerGroup");
   defineHiddenBool(paramSet, "dirUsesStockCalibration", true);
-  defineBool(paramSet, "grainEnabled", "Enabled", false, "grainGroup");
-  const char *grainModels[] = {"Preview", "Production", "Grain Synthesis"};
-  defineChoice(paramSet, "grainModel", "Model", grainModels, grainModelOptionCountForFlavor(), 0, "grainGroup");
-  defineDouble(paramSet, "grainAmount", "Amount", 1.0, 0.0, 2.0, "grainGroup");
-  defineDouble(paramSet, "grainSaturation", "Saturation", 1.0, 0.0, 1.0, "grainGroup");
-  defineBool(paramSet, "grainSublayersEnabled", "Sublayers", true, "grainGroup");
-  defineInt(paramSet, "grainSubLayerCount", "Sub Layer Count", 1, 1, 8, "grainGroup");
-  defineDouble(paramSet, "grainParticleAreaUm2", "Particle Area um2", 0.1, 0.01, 5.0, "grainGroup");
-  defineDouble3D(paramSet, "grainParticleScale", "Particle Scale RGB", 1.2, 1.0, 2.5, "grainGroup");
-  defineDouble3D(paramSet, "grainParticleScaleLayers", "Layer Scale", 6.0, 1.0, 0.4, "grainGroup");
-  defineDouble3D(paramSet, "grainDensityMin", "Density Min", 0.04, 0.05, 0.06, "grainGroup");
-  defineDouble3D(paramSet, "grainUniformity", "Uniformity RGB", 0.99, 0.97, 0.98, "grainGroup");
-  defineDouble(paramSet, "grainFinalBlurUm", "Final Grain Blur", 7.17, 0.0, 25.0, "grainGroup");
-  defineDouble(paramSet, "grainBlurDyeCloudsUm", "Dye Cloud Blur um", 1.0, 0.0, 10.0, "grainGroup");
-  defineDouble2D(paramSet, "grainMicroStructure", "Micro Structure", 0.2, 30.0, "grainGroup");
-  defineInt(paramSet, kGrainSeedParamName, "Seed", descriptorGrainSeedDefault(), kGrainSeedMin, kGrainSeedMax, "grainGroup");
-  defineBool(paramSet, "grainAnimate", "Animate", true, "grainGroup");
-  defineDouble(paramSet, "grainSynthesisSize", "Synthesis Size", 1.0, 0.25, 4.0, "grainGroup");
-  defineDouble(paramSet, "grainSynthesisAmount", "Synthesis Amount", 1.0, 0.0, 3.0, "grainGroup");
-  defineDouble(paramSet, "grainSynthesisSharpness", "Synthesis Sharpness", 1.0, 0.25, 4.0, "grainGroup");
-  defineDouble(paramSet, "grainSynthesisQuality", "Synthesis Quality", 1.0, 0.25, 4.0, "grainGroup");
-  defineInt(paramSet, "grainSynthesisSamples", "Samples", 128, 1, 2048, "grainSynthesisGroup");
-  defineDouble(paramSet, "grainSynthesisMeanRadiusUm", "Mean Radius um", 0.25, 0.05, 10.0, "grainSynthesisGroup");
-  defineDouble(paramSet, "grainSynthesisRadiusStdDevRatio", "Radius StdDev Ratio", 0.0, 0.0, 1.0, "grainSynthesisGroup");
-  defineDouble(paramSet, "grainSynthesisObservationSigmaUm", "Observation Aperture Sigma um", 1.0, 0.0, 20.0, "grainSynthesisGroup");
-  defineDouble(paramSet, "grainSynthesisCellSizeRatio", "Cell Size Ratio", 1.0, 0.25, 2.0, "grainSynthesisGroup");
-  defineDouble(paramSet, "grainSynthesisMaxRadiusQuantile", "Max Radius Quantile", 0.999, 0.95, 0.9999, "grainSynthesisGroup");
-  defineDouble(paramSet, "grainSynthesisCoverageEpsilon", "Coverage Epsilon", 0.0001, 0.000001, 0.01, "grainSynthesisGroup");
-  defineInt(paramSet, "grainSynthesisMaxGrainsPerCell", "Max Grains Per Cell", 32, 1, 128, "grainSynthesisGroup");
-  defineDouble3D(paramSet, "grainSynthesisRadiusScale", "Radius Scale RGB", 1.2, 1.0, 2.5, "grainSynthesisGroup");
-  defineDouble3D(paramSet, "grainSynthesisLayerScale", "Layer Scale", 6.0, 1.0, 0.4, "grainSynthesisGroup");
-  defineBool(paramSet, "grainSynthesisLayered", "Layered", true, "grainSynthesisGroup");
-  defineBool(paramSet, "halationEnabled", "Enabled", false, "halationGroup");
-  defineDouble(paramSet, "scatterAmount", "Scatter Amount", 1.0, 0.0, 2.0, "halationGroup");
-  defineDouble(paramSet, "scatterScale", "Scatter Scale", 1.0, 0.0, 4.0, "halationGroup");
-  defineDouble(paramSet, "halationAmount", "Amount", 1.0, 0.0, 4.0, "halationGroup");
-  defineDouble(paramSet, "halationScale", "Scale", 1.0, 0.0, 4.0, "halationGroup");
-  defineDouble(paramSet, "halationBoostEv", "Boost EV", 0.0, 0.0, 20.0, "halationGroup");
-  defineDouble(paramSet, "halationBoostRange", "Boost Range", 0.3, 0.0, 1.0, "halationGroup");
-  defineDouble(paramSet, "halationProtectEv", "Protect EV", 4.0, 0.0, 10.0, "halationGroup");
-  defineRGB(paramSet, "halationStrength", "Strength RGB", 0.05, 0.015, 0.0, "halationGroup");
-  const char *diffusionFamilies[] = {"Glimmerglass", "Black Pro-Mist", "Pro-Mist", "CineBloom"};
-  defineBool(paramSet, "cameraDiffusionEnabled", "Camera Enabled", false, "diffusionGroup");
-  defineChoice(paramSet, "cameraDiffusionFamily", "Camera Family", diffusionFamilies, 4, 1, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionStrength", "Camera Strength", 0.5, 0.0, 2.0, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionSpatialScale", "Camera Spatial Scale", 1.0, 0.0, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionHaloWarmth", "Camera Halo Warmth", 0.0, -1.5, 1.5, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionCoreIntensity", "Camera Core Intensity", 1.0, 0.0, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionCoreSize", "Camera Core Size", 1.0, 0.1, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionHaloIntensity", "Camera Halo Intensity", 1.0, 0.0, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionHaloSize", "Camera Halo Size", 1.0, 0.1, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionBloomIntensity", "Camera Bloom Intensity", 1.0, 0.0, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "cameraDiffusionBloomSize", "Camera Bloom Size", 1.0, 0.1, 4.0, "diffusionGroup");
-  defineBool(paramSet, "printDiffusionEnabled", "Print Enabled", false, "diffusionGroup");
-  defineChoice(paramSet, "printDiffusionFamily", "Print Family", diffusionFamilies, 4, 1, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionStrength", "Print Strength", 0.5, 0.0, 2.0, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionSpatialScale", "Print Spatial Scale", 1.0, 0.0, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionHaloWarmth", "Print Halo Warmth", 0.0, -1.5, 1.5, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionCoreIntensity", "Print Core Intensity", 1.0, 0.0, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionCoreSize", "Print Core Size", 1.0, 0.1, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionHaloIntensity", "Print Halo Intensity", 1.0, 0.0, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionHaloSize", "Print Halo Size", 1.0, 0.1, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionBloomIntensity", "Print Bloom Intensity", 1.0, 0.0, 4.0, "diffusionGroup");
-  defineDouble(paramSet, "printDiffusionBloomSize", "Print Bloom Size", 1.0, 0.1, 4.0, "diffusionGroup");
-  defineBool(paramSet, "scannerEnabled", "Enabled", false, "scannerGroup");
-  defineBool(paramSet, "scannerWhiteCorrection", "White Correction", false, "scannerGroup");
-  defineBool(paramSet, "scannerBlackCorrection", "Black Correction", false, "scannerGroup");
-  defineDouble(paramSet, "scannerWhiteLevel", "White Level", 0.98, 0.0, 1.0, "scannerGroup");
-  defineDouble(paramSet, "scannerBlackLevel", "Black Level", 0.01, 0.0, 1.0, "scannerGroup");
-  defineDouble(paramSet, "glarePercent", "Glare Percent", 0.03, 0.0, 0.2, "scannerGroup");
-  defineDouble(paramSet, "glareRoughness", "Glare Roughness", 0.7, 0.0, 4.0, "scannerGroup");
-  defineDouble(paramSet, "glareBlur", "Glare Blur", 0.5, 0.0, 32.0, "scannerGroup");
-  defineDouble(paramSet, "scannerMtf50LpMm", "MTF50 lp/mm", 60.0, 0.0, 300.0, "scannerGroup");
-  defineDouble(paramSet, "scannerUnsharpRadiusUm", "Unsharp Radius um", 5.0, 0.0, 100.0, "scannerGroup");
-  defineDouble(paramSet, "scannerUnsharpAmount", "Unsharp Amount", 0.7, 0.0, 4.0, "scannerGroup");
-  defineLabel(paramSet, "infoVersion", "Version:", SPEKTRAFILM_VERSION_STRING, "infoGroup");
-  defineLabel(paramSet, "infoCreatedBy", "Created by:", "Aedan Diez", "infoGroup");
-  defineLabel(paramSet, "infoBasedOn", "Based on work by:", "Andrea Volpato & Johannes Hanika", "infoGroup");
-  const char *gpuRenderTilingOptions[] = {"Full-frame", "Experimental tiled"};
-  defineChoice(paramSet, "gpuRenderTiling", "GPU Render Tiling", gpuRenderTilingOptions, 2, 0, "manageGroup");
-  const char *lutSizes[] = {"33", "65"};
-  const char *lutDestinations[] = {"User", "DaVinci Resolve", "Nuke", "Adobe Creative", "Final Cut Pro"};
-  defineChoice(paramSet, "lutSize", "LUT Size", lutSizes, 2, 1, "manageGroup");
-  defineChoice(paramSet, "lutDestination", "LUT Destination", lutDestinations, 5, 0, "manageGroup");
-  defineSingleLineString(paramSet, "lutIdentifier", "LUT Identifier", "spektrafilm", "manageGroup");
-  definePushButton(paramSet, "exportLut", "Export LUT", "manageGroup");
+  defineBool(paramSet, "grainEnabled", tr("param.grainEnabled"), false, "grainGroup");
+  const char *grainModels[] = {tr("choice.grainModel.preview"), tr("choice.grainModel.production"), tr("choice.grainModel.synthesis")};
+  defineChoice(paramSet, "grainModel", tr("param.grainModel"), grainModels, grainModelOptionCountForFlavor(), 0, "grainGroup");
+  defineDouble(paramSet, "grainAmount", tr("param.grainAmount"), 1.0, 0.0, 2.0, "grainGroup");
+  defineDouble(paramSet, "grainSaturation", tr("param.grainSaturation"), 1.0, 0.0, 1.0, "grainGroup");
+  defineBool(paramSet, "grainSublayersEnabled", tr("param.grainSublayersEnabled"), true, "grainGroup");
+  defineInt(paramSet, "grainSubLayerCount", tr("param.grainSubLayerCount"), 1, 1, 8, "grainGroup");
+  defineDouble(paramSet, "grainParticleAreaUm2", tr("param.grainParticleAreaUm2"), 0.1, 0.01, 5.0, "grainGroup");
+  defineDouble3D(paramSet, "grainParticleScale", tr("param.grainParticleScale"), 1.2, 1.0, 2.5, "grainGroup");
+  defineDouble3D(paramSet, "grainParticleScaleLayers", tr("param.grainParticleScaleLayers"), 6.0, 1.0, 0.4, "grainGroup");
+  defineDouble3D(paramSet, "grainDensityMin", tr("param.grainDensityMin"), 0.04, 0.05, 0.06, "grainGroup");
+  defineDouble3D(paramSet, "grainUniformity", tr("param.grainUniformity"), 0.99, 0.97, 0.98, "grainGroup");
+  defineDouble(paramSet, "grainFinalBlurUm", tr("param.grainFinalBlurUm"), 7.17, 0.0, 25.0, "grainGroup");
+  defineDouble(paramSet, "grainBlurDyeCloudsUm", tr("param.grainBlurDyeCloudsUm"), 1.0, 0.0, 10.0, "grainGroup");
+  defineDouble2D(paramSet, "grainMicroStructure", tr("param.grainMicroStructure"), 0.2, 30.0, "grainGroup");
+  defineInt(paramSet, kGrainSeedParamName, tr("param.grainSeed"), descriptorGrainSeedDefault(), kGrainSeedMin, kGrainSeedMax, "grainGroup");
+  defineBool(paramSet, "grainAnimate", tr("param.grainAnimate"), true, "grainGroup");
+  defineDouble(paramSet, "grainSynthesisSize", tr("param.grainSynthesisSize"), 1.0, 0.25, 4.0, "grainGroup");
+  defineDouble(paramSet, "grainSynthesisAmount", tr("param.grainSynthesisAmount"), 1.0, 0.0, 3.0, "grainGroup");
+  defineDouble(paramSet, "grainSynthesisSharpness", tr("param.grainSynthesisSharpness"), 1.0, 0.25, 4.0, "grainGroup");
+  defineDouble(paramSet, "grainSynthesisQuality", tr("param.grainSynthesisQuality"), 1.0, 0.25, 4.0, "grainGroup");
+  defineInt(paramSet, "grainSynthesisSamples", tr("param.grainSynthesisSamples"), 128, 1, 2048, "grainSynthesisGroup");
+  defineDouble(paramSet, "grainSynthesisMeanRadiusUm", tr("param.grainSynthesisMeanRadiusUm"), 0.25, 0.05, 10.0, "grainSynthesisGroup");
+  defineDouble(paramSet, "grainSynthesisRadiusStdDevRatio", tr("param.grainSynthesisRadiusStdDevRatio"), 0.0, 0.0, 1.0, "grainSynthesisGroup");
+  defineDouble(paramSet, "grainSynthesisObservationSigmaUm", tr("param.grainSynthesisObservationSigmaUm"), 1.0, 0.0, 20.0, "grainSynthesisGroup");
+  defineDouble(paramSet, "grainSynthesisCellSizeRatio", tr("param.grainSynthesisCellSizeRatio"), 1.0, 0.25, 2.0, "grainSynthesisGroup");
+  defineDouble(paramSet, "grainSynthesisMaxRadiusQuantile", tr("param.grainSynthesisMaxRadiusQuantile"), 0.999, 0.95, 0.9999, "grainSynthesisGroup");
+  defineDouble(paramSet, "grainSynthesisCoverageEpsilon", tr("param.grainSynthesisCoverageEpsilon"), 0.0001, 0.000001, 0.01, "grainSynthesisGroup");
+  defineInt(paramSet, "grainSynthesisMaxGrainsPerCell", tr("param.grainSynthesisMaxGrainsPerCell"), 32, 1, 128, "grainSynthesisGroup");
+  defineDouble3D(paramSet, "grainSynthesisRadiusScale", tr("param.grainSynthesisRadiusScale"), 1.2, 1.0, 2.5, "grainSynthesisGroup");
+  defineDouble3D(paramSet, "grainSynthesisLayerScale", tr("param.grainSynthesisLayerScale"), 6.0, 1.0, 0.4, "grainSynthesisGroup");
+  defineBool(paramSet, "grainSynthesisLayered", tr("param.grainSynthesisLayered"), true, "grainSynthesisGroup");
+  defineBool(paramSet, "halationEnabled", tr("param.halationEnabled"), false, "halationGroup");
+  defineDouble(paramSet, "scatterAmount", tr("param.scatterAmount"), 1.0, 0.0, 2.0, "halationGroup");
+  defineDouble(paramSet, "scatterScale", tr("param.scatterScale"), 1.0, 0.0, 4.0, "halationGroup");
+  defineDouble(paramSet, "halationAmount", tr("param.halationAmount"), 1.0, 0.0, 4.0, "halationGroup");
+  defineDouble(paramSet, "halationScale", tr("param.halationScale"), 1.0, 0.0, 4.0, "halationGroup");
+  defineDouble(paramSet, "halationBoostEv", tr("param.halationBoostEv"), 0.0, 0.0, 20.0, "halationGroup");
+  defineDouble(paramSet, "halationBoostRange", tr("param.halationBoostRange"), 0.3, 0.0, 1.0, "halationGroup");
+  defineDouble(paramSet, "halationProtectEv", tr("param.halationProtectEv"), 4.0, 0.0, 10.0, "halationGroup");
+  defineRGB(paramSet, "halationStrength", tr("param.halationStrength"), 0.05, 0.015, 0.0, "halationGroup");
+  const char *diffusionFamilies[] = {tr("choice.diffusionFamily.glimmerglass"), tr("choice.diffusionFamily.blackProMist"), tr("choice.diffusionFamily.proMist"), tr("choice.diffusionFamily.cineBloom")};
+  defineBool(paramSet, "cameraDiffusionEnabled", tr("param.cameraDiffusionEnabled"), false, "diffusionGroup");
+  defineChoice(paramSet, "cameraDiffusionFamily", tr("param.cameraDiffusionFamily"), diffusionFamilies, 4, 1, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionStrength", tr("param.cameraDiffusionStrength"), 0.5, 0.0, 2.0, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionSpatialScale", tr("param.cameraDiffusionSpatialScale"), 1.0, 0.0, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionHaloWarmth", tr("param.cameraDiffusionHaloWarmth"), 0.0, -1.5, 1.5, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionCoreIntensity", tr("param.cameraDiffusionCoreIntensity"), 1.0, 0.0, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionCoreSize", tr("param.cameraDiffusionCoreSize"), 1.0, 0.1, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionHaloIntensity", tr("param.cameraDiffusionHaloIntensity"), 1.0, 0.0, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionHaloSize", tr("param.cameraDiffusionHaloSize"), 1.0, 0.1, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionBloomIntensity", tr("param.cameraDiffusionBloomIntensity"), 1.0, 0.0, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "cameraDiffusionBloomSize", tr("param.cameraDiffusionBloomSize"), 1.0, 0.1, 4.0, "diffusionGroup");
+  defineBool(paramSet, "printDiffusionEnabled", tr("param.printDiffusionEnabled"), false, "diffusionGroup");
+  defineChoice(paramSet, "printDiffusionFamily", tr("param.printDiffusionFamily"), diffusionFamilies, 4, 1, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionStrength", tr("param.printDiffusionStrength"), 0.5, 0.0, 2.0, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionSpatialScale", tr("param.printDiffusionSpatialScale"), 1.0, 0.0, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionHaloWarmth", tr("param.printDiffusionHaloWarmth"), 0.0, -1.5, 1.5, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionCoreIntensity", tr("param.printDiffusionCoreIntensity"), 1.0, 0.0, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionCoreSize", tr("param.printDiffusionCoreSize"), 1.0, 0.1, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionHaloIntensity", tr("param.printDiffusionHaloIntensity"), 1.0, 0.0, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionHaloSize", tr("param.printDiffusionHaloSize"), 1.0, 0.1, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionBloomIntensity", tr("param.printDiffusionBloomIntensity"), 1.0, 0.0, 4.0, "diffusionGroup");
+  defineDouble(paramSet, "printDiffusionBloomSize", tr("param.printDiffusionBloomSize"), 1.0, 0.1, 4.0, "diffusionGroup");
+  defineBool(paramSet, "scannerEnabled", tr("param.scannerEnabled"), false, "scannerGroup");
+  defineBool(paramSet, "scannerWhiteCorrection", tr("param.scannerWhiteCorrection"), false, "scannerGroup");
+  defineBool(paramSet, "scannerBlackCorrection", tr("param.scannerBlackCorrection"), false, "scannerGroup");
+  defineDouble(paramSet, "scannerWhiteLevel", tr("param.scannerWhiteLevel"), 0.98, 0.0, 1.0, "scannerGroup");
+  defineDouble(paramSet, "scannerBlackLevel", tr("param.scannerBlackLevel"), 0.01, 0.0, 1.0, "scannerGroup");
+  defineDouble(paramSet, "glarePercent", tr("param.glarePercent"), 0.03, 0.0, 0.2, "scannerGroup");
+  defineDouble(paramSet, "glareRoughness", tr("param.glareRoughness"), 0.7, 0.0, 4.0, "scannerGroup");
+  defineDouble(paramSet, "glareBlur", tr("param.glareBlur"), 0.5, 0.0, 32.0, "scannerGroup");
+  defineDouble(paramSet, "scannerMtf50LpMm", tr("param.scannerMtf50LpMm"), 60.0, 0.0, 300.0, "scannerGroup");
+  defineDouble(paramSet, "scannerUnsharpRadiusUm", tr("param.scannerUnsharpRadiusUm"), 5.0, 0.0, 100.0, "scannerGroup");
+  defineDouble(paramSet, "scannerUnsharpAmount", tr("param.scannerUnsharpAmount"), 0.7, 0.0, 4.0, "scannerGroup");
+  defineLabel(paramSet, "infoVersion", tr("info.version"), SPEKTRAFILM_VERSION_STRING, "infoGroup");
+  defineLabel(paramSet, "infoCreatedBy", tr("info.createdBy"), "Aedan Diez", "infoGroup");
+  defineLabel(paramSet, "infoBasedOn", tr("info.basedOn"), "Andrea Volpato & Johannes Hanika", "infoGroup");
+  const char *gpuRenderTilingOptions[] = {tr("choice.gpuRenderTiling.fullFrame"), tr("choice.gpuRenderTiling.tiled")};
+  defineChoice(paramSet, "gpuRenderTiling", tr("param.gpuRenderTiling"), gpuRenderTilingOptions, 2, 0, "manageGroup");
+  const char *lutSizes[] = {tr("choice.lutSize.33"), tr("choice.lutSize.65")};
+  const char *lutDestinations[] = {tr("choice.lutDestination.spektrafilm"), tr("choice.lutDestination.resolve"), tr("choice.lutDestination.nuke"), tr("choice.lutDestination.adobe"), tr("choice.lutDestination.fcpx")};
+  defineChoice(paramSet, "lutSize", tr("param.lutSize"), lutSizes, 2, 1, "manageGroup");
+  defineChoice(paramSet, "lutDestination", tr("param.lutDestination"), lutDestinations, 5, 0, "manageGroup");
+  defineSingleLineString(paramSet, "lutIdentifier", tr("param.lutIdentifier"), "spektrafilm", "manageGroup");
+  definePushButton(paramSet, "exportLut", tr("param.exportLut"), "manageGroup");
   defineSingleLineString(paramSet, "presetName", "Preset Name", "spektrafilm_preset", "manageGroup");
   const std::vector<PresetEntry> presetEntries = listPresetEntries();
   const std::vector<std::string> presetLabels = presetChoiceLabels(presetEntries);
@@ -5156,11 +5168,11 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
   defineChoice(paramSet, "presetSelection", "Preset", presetLabelPointers.data(), static_cast<int>(presetLabelPointers.size()), 0, "manageGroup");
   definePushButton(paramSet, "savePreset", "Save Preset", "manageGroup");
   definePushButton(paramSet, "loadPreset", "Load Preset", "manageGroup");
-  definePushButton(paramSet, "copyParams", "Copy Params", "manageGroup");
-  definePushButton(paramSet, "pasteParams", "Paste Params", "manageGroup");
-  definePushButton(paramSet, "saveDefaults", "Set Defaults", "manageGroup");
-  definePushButton(paramSet, "resetDefaults", "Reset Factory Defaults", "manageGroup");
-  definePushButton(paramSet, "openUserManual", "Open User Manual", "manageGroup");
+  definePushButton(paramSet, "copyParams", tr("param.copyParams"), "manageGroup");
+  definePushButton(paramSet, "pasteParams", tr("param.pasteParams"), "manageGroup");
+  definePushButton(paramSet, "saveDefaults", tr("param.saveDefaults"), "manageGroup");
+  definePushButton(paramSet, "resetDefaults", tr("param.resetDefaults"), "manageGroup");
+  definePushButton(paramSet, "openUserManual", tr("param.openUserManual"), "manageGroup");
 
   gDescribeDefaults = nullptr;
   return kOfxStatOK;
@@ -5173,6 +5185,12 @@ OfxStatus describe(OfxImageEffectHandle effect) {
   gPropHost->propSetString(props, kOfxPropIcon, 0, svgIconFileForFlavor());
   gPropHost->propSetString(props, kOfxPropIcon, 1, pngIconFileForFlavor());
   gPropHost->propSetString(props, kOfxImageEffectPluginPropGrouping, 0, "spektrafilm OFX");
+  initLanguage(detectLanguageFromProps(props, kOfxImageEffectPropCurrentLanguage));
+  gPropHost->propSetString(props, kOfxImageEffectPropSupportedLanguages, 0, "en");
+  gPropHost->propSetString(props, kOfxImageEffectPropSupportedLanguages, 1, "zh-CN");
+  gPropHost->propSetString(props, kOfxImageEffectPropSupportedLanguages, 2, "zh-TW");
+  gPropHost->propSetString(props, kOfxImageEffectPropSupportedLanguages, 3, "ja");
+  gPropHost->propSetString(props, kOfxImageEffectPropSupportedLanguages, 4, "ko");
   gPropHost->propSetString(props, kOfxImageEffectPropSupportedContexts, 0, kOfxImageEffectContextFilter);
   gPropHost->propSetString(props, kOfxImageEffectPropSupportedPixelDepths, 0, kOfxBitDepthHalf);
   gPropHost->propSetString(props, kOfxImageEffectPropSupportedPixelDepths, 1, kOfxBitDepthFloat);

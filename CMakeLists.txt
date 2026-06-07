@@ -237,6 +237,24 @@ add_custom_command(
   VERBATIM
 )
 
+set(SPEKTRAFILM_GENERATED_TRANSLATIONS_HEADER
+  "${CMAKE_CURRENT_BINARY_DIR}/generated/SpektraGeneratedTranslations.h"
+)
+
+add_custom_command(
+  OUTPUT "${SPEKTRAFILM_GENERATED_TRANSLATIONS_HEADER}"
+  COMMAND "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_translations.py"
+          "--input" "${CMAKE_CURRENT_SOURCE_DIR}/Resources/lang/translations.json"
+          "--output" "${SPEKTRAFILM_GENERATED_TRANSLATIONS_HEADER}"
+  DEPENDS
+          "${CMAKE_CURRENT_SOURCE_DIR}/Resources/lang/translations.json"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_translations.py"
+  VERBATIM
+)
+
+add_custom_target(SpektraFilmTranslations DEPENDS "${SPEKTRAFILM_GENERATED_TRANSLATIONS_HEADER}")
+
 set(SPEKTRAFILM_COMMON_PLUGIN_SOURCES
   src/SpektraFilmPlugin.cpp
   "${SPEKTRAFILM_GENERATED_PROFILE_CURVES}"
@@ -839,6 +857,10 @@ add_spektra_ofx_plugin(spektrafilm_flow spektrafilm_flow "spektrafilm flow" org.
 add_spektra_ofx_plugin(spektrafilm spektrafilm spektrafilm org.spektrafilm 1 TRUE)
 add_spektra_ofx_plugin(spektrafilm_dev spektrafilm_dev "spektrafilm dev" org.spektrafilm.dev 2 FALSE)
 
+add_dependencies(spektrafilm_flow SpektraFilmTranslations)
+add_dependencies(spektrafilm SpektraFilmTranslations)
+add_dependencies(spektrafilm_dev SpektraFilmTranslations)
+
 if(APPLE)
   add_library(SpektraFilmNativeCore STATIC
     src/SpektraAppBridge.mm
@@ -855,6 +877,7 @@ if(APPLE)
   apply_spektra_macos_native_options(SpektraFilmNativeCore)
 
   add_dependencies(SpektraFilmNativeCore SpektraFilmMetalLibrary)
+  add_dependencies(SpektraFilmNativeCore SpektraFilmTranslations)
 
   add_executable(SpektraFilmPerfHarness
     tools/SpektraMetalPerfHarness.mm
@@ -1027,6 +1050,7 @@ elseif(SPEKTRAFILM_USE_VULKAN)
     target_link_libraries(SpektraVulkanCopyHarness PRIVATE ${CMAKE_DL_LIBS})
   endif()
   add_dependencies(SpektraVulkanCopyHarness SpektraFilmVulkanShaders)
+  add_dependencies(SpektraVulkanCopyHarness SpektraFilmTranslations)
 
   add_custom_command(TARGET SpektraVulkanCopyHarness POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:SpektraVulkanCopyHarness>/shaders"

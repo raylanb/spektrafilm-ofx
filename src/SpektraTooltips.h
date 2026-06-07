@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstring>
+#include <string>
+
+#include "SpektraLang.h"
 
 namespace spektrafilm {
 
@@ -180,6 +183,13 @@ inline constexpr TooltipEntry kTooltipEntries[] = {
 };
 
 inline const char *tooltipForParam(const char *name) {
+  static std::string fullId;
+  fullId = "tooltip.";
+  fullId += name;
+  const char *result = tr(fullId.c_str());
+  if (result != fullId.c_str()) {
+    return result;
+  }
   for (const TooltipEntry &entry : kTooltipEntries) {
     if (std::strcmp(entry.name, name) == 0) {
       return entry.hint;
