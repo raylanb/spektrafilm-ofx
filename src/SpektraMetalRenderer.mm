@@ -183,7 +183,7 @@ struct KernelParams {
   float negativeBleachBypassAmount;
   float negativeLeucoCyanCoupling;
   float printBleachBypassAmount;
-  float _padBleachBypass1;
+  uint32_t scanNegativeInvert;
   float filterC;
   float filterMShift;
   float filterYShift;
@@ -469,6 +469,12 @@ struct StaticProfileResources {
   float cameraUvCutNm = 410.0f;
   bool cameraIrFilterEnabled = false;
   float cameraIrCutNm = 675.0f;
+  PrintTimingMode processNegativePrintTiming = PrintTimingMode::FilteredEnlarger;
+  float processNegativeFilterC = 0.0f;
+  float processNegativeFilterMShift = 0.0f;
+  float processNegativeFilterYShift = 0.0f;
+  float processNegativePreflashMFilterShift = 0.0f;
+  float processNegativePreflashYFilterShift = 0.0f;
   const ProfileCurveSet *filmCurves = nullptr;
   const ProfileCurveSet *paperCurves = nullptr;
   KernelCurveInfo curveInfo{};
@@ -483,6 +489,8 @@ struct StaticProfileResources {
   id<MTLBuffer> logSensitivityBuffer = nil;
   id<MTLBuffer> bandpassHanatosBuffer = nil;
   id<MTLBuffer> hanatosRawResponseBuffer = nil;
+  id<MTLBuffer> paperHanatosResponseBuffer = nil;
+  id<MTLBuffer> preflashPaperHanatosResponseBuffer = nil;
   id<MTLBuffer> mallettBasisIlluminantBuffer = nil;
   id<MTLBuffer> inputToReferenceXyzBuffer = nil;
   id<MTLBuffer> inputToSrgbBuffer = nil;
@@ -508,6 +516,14 @@ struct StaticProfileResources {
   id<MTLBuffer> colorEncodeLutBuffer = nil;
 
   bool validFor(const RenderParams &params) const {
+    const bool processNegativeResponseValid =
+      params.process != ProcessMode::ProcessNegative ||
+      (processNegativePrintTiming == params.printTiming &&
+       processNegativeFilterC == params.filterC &&
+       processNegativeFilterMShift == params.filterMShift &&
+       processNegativeFilterYShift == params.filterYShift &&
+       processNegativePreflashMFilterShift == params.preflashMFilterShift &&
+       processNegativePreflashYFilterShift == params.preflashYFilterShift);
     return film == params.film &&
            paper == params.paper &&
            rgbToRawMethod == params.rgbToRawMethod &&
@@ -515,6 +531,7 @@ struct StaticProfileResources {
            cameraUvCutNm == params.cameraUvCutNm &&
            cameraIrFilterEnabled == params.cameraIrFilterEnabled &&
            cameraIrCutNm == params.cameraIrCutNm &&
+           processNegativeResponseValid &&
            filmCurves &&
            paperCurves &&
            curveInfoBuffer &&
@@ -525,6 +542,8 @@ struct StaticProfileResources {
            logSensitivityBuffer &&
            bandpassHanatosBuffer &&
            hanatosRawResponseBuffer &&
+           paperHanatosResponseBuffer &&
+           preflashPaperHanatosResponseBuffer &&
            mallettBasisIlluminantBuffer &&
            inputToReferenceXyzBuffer &&
            inputToSrgbBuffer &&
@@ -571,6 +590,8 @@ struct StaticProfileResources {
     logSensitivityBuffer = nil;
     bandpassHanatosBuffer = nil;
     hanatosRawResponseBuffer = nil;
+    paperHanatosResponseBuffer = nil;
+    preflashPaperHanatosResponseBuffer = nil;
     mallettBasisIlluminantBuffer = nil;
     inputToReferenceXyzBuffer = nil;
     inputToSrgbBuffer = nil;
@@ -930,6 +951,7 @@ KernelParams toKernelParams(const RenderParams &params, double time, int32_t wid
   out.negativeBleachBypassAmount = params.negativeBleachBypassAmount;
   out.negativeLeucoCyanCoupling = params.negativeLeucoCyanCoupling;
   out.printBleachBypassAmount = params.printBleachBypassAmount;
+  out.scanNegativeInvert = params.scanNegativeInvert ? 1u : 0u;
   out.filmGamma = params.filmPushPullMode == PushPullMode::Experimental
     ? params.filmGamma
     : params.filmGamma * filmPushPullGamma(params.filmPushPullStops);
@@ -1865,6 +1887,132 @@ std::vector<float> makeHanatosRawResponsePair(
   return packed;
 }
 
+std::vector<float> makeHanatosResponsePairFromWeights(
+  const ProfileCurveSet &referenceCurves,
+  const std::vector<float> &spectralWeights,
+  const std::vector<float> &hanatosSpectra,
+  const HanatosSpectraLutInfo &hanatos
+) {
+  const size_t responseCount = static_cast<size_t>(hanatos.width) * static_cast<size_t>(hanatos.height) * 3u;
+  std::vector<float> response(responseCount, 0.0f);
+  const size_t expectedSpectra = static_cast<size_t>(hanatos.width) * static_cast<size_t>(hanatos.height) * static_cast<size_t>(hanatos.wavelengthCount);
+  if (hanatos.width == 0u ||
+      hanatos.height == 0u ||
+      hanatos.wavelengthCount == 0u ||
+      hanatosSpectra.size() < expectedSpectra ||
+      spectralWeights.size() < static_cast<size_t>(hanatos.wavelengthCount) * 3u) {
+    return response;
+  }
+  for (uint32_t x = 0; x < hanatos.width; ++x) {
+    for (uint32_t y = 0; y < hanatos.height; ++y) {
+      float raw[3] = {0.0f, 0.0f, 0.0f};
+      const size_t spectraOffset = (static_cast<size_t>(x) * hanatos.height + y) * hanatos.wavelengthCount;
+      for (uint32_t wavelength = 0u; wavelength < hanatos.wavelengthCount; ++wavelength) {
+        const float spectrum = hanatosSpectra[spectraOffset + wavelength];
+        const uint32_t weightOffset = wavelength * 3u;
+        raw[0] += spectrum * spectralWeights[weightOffset];
+        raw[1] += spectrum * spectralWeights[weightOffset + 1u];
+        raw[2] += spectrum * spectralWeights[weightOffset + 2u];
+      }
+      const size_t responseOffset = (static_cast<size_t>(x) * hanatos.height + y) * 3u;
+      response[responseOffset] = raw[0];
+      response[responseOffset + 1u] = raw[1];
+      response[responseOffset + 2u] = raw[2];
+    }
+  }
+
+  std::vector<float> compressed = remapHanatosResponseForInputGamutCompression(referenceCurves, response, hanatos);
+  std::vector<float> packed;
+  packed.reserve((response.size() + compressed.size()) / 3u * 4u);
+  const auto appendPackedResponse = [&](const std::vector<float> &source) {
+    for (size_t offset = 0u; offset + 2u < source.size(); offset += 3u) {
+      packed.push_back(source[offset]);
+      packed.push_back(source[offset + 1u]);
+      packed.push_back(source[offset + 2u]);
+      packed.push_back(0.0f);
+    }
+  };
+  appendPackedResponse(response);
+  appendPackedResponse(compressed);
+  return packed;
+}
+
+float filteredEnlargerIlluminantCpu(
+  uint32_t wavelength,
+  const RenderParams &params,
+  float cFilter,
+  float mFilterShift,
+  float yFilterShift
+) {
+  const uint32_t film = std::min<uint32_t>(
+    static_cast<uint32_t>(std::max(params.film, 0)),
+    std::max<uint32_t>(kSpektraFilmCount, 1u) - 1u
+  );
+  const uint32_t paper = std::min<uint32_t>(
+    static_cast<uint32_t>(std::max(params.paper, 0)),
+    std::max<uint32_t>(kSpektraPaperCount, 1u) - 1u
+  );
+  const uint32_t neutralOffset = (paper * kSpektraFilmCount + film) * 3u;
+  const float *neutral = neutralPrintFilters();
+  const float cc0 = std::max(neutral[neutralOffset] + cFilter, 0.0f);
+  const float cc1 = std::max(neutral[neutralOffset + 1u] + mFilterShift, 0.0f);
+  const float cc2 = std::max(neutral[neutralOffset + 2u] + yFilterShift, 0.0f);
+  const float wheel0 = std::pow(10.0f, -cc0 / 100.0f);
+  const float wheel1 = std::pow(10.0f, -cc1 / 100.0f);
+  const float wheel2 = std::pow(10.0f, -cc2 / 100.0f);
+  const uint32_t offset = wavelength * 3u;
+  const float *filters = customEnlargerFilters();
+  const float f0 = std::clamp(filters[offset], 0.0f, 1.0f);
+  const float f1 = std::clamp(filters[offset + 1u], 0.0f, 1.0f);
+  const float f2 = std::clamp(filters[offset + 2u], 0.0f, 1.0f);
+  const float dim0 = 1.0f - (1.0f - f0) * (1.0f - wheel0);
+  const float dim1 = 1.0f - (1.0f - f1) * (1.0f - wheel1);
+  const float dim2 = 1.0f - (1.0f - f2) * (1.0f - wheel2);
+  return thKg3Illuminant()[wavelength] * dim0 * dim1 * dim2;
+}
+
+std::vector<float> makeProcessNegativePaperWeights(
+  const ProfileCurveSet &paperCurves,
+  const std::vector<float> &paperSensitivityLinear,
+  const RenderParams &params,
+  bool preflash
+) {
+  std::vector<float> weights(static_cast<size_t>(paperCurves.wavelengthCount) * 3u, 0.0f);
+  if (paperSensitivityLinear.size() < weights.size()) {
+    return weights;
+  }
+  if (params.printTiming == PrintTimingMode::ApdPrinterDensity) {
+    std::array<float, 3> normalization = {0.0f, 0.0f, 0.0f};
+    for (uint32_t wavelength = 0u; wavelength < paperCurves.wavelengthCount; ++wavelength) {
+      const uint32_t offset = wavelength * 3u;
+      normalization[0] += std::max(academyPrinterDensityData()[offset], 0.0f);
+      normalization[1] += std::max(academyPrinterDensityData()[offset + 1u], 0.0f);
+      normalization[2] += std::max(academyPrinterDensityData()[offset + 2u], 0.0f);
+    }
+    const float preflashScale = preflash ? std::max(params.preflashExposure, 0.0f) : 1.0f;
+    for (uint32_t wavelength = 0u; wavelength < paperCurves.wavelengthCount; ++wavelength) {
+      const uint32_t offset = wavelength * 3u;
+      weights[offset] = preflashScale * std::max(academyPrinterDensityData()[offset], 0.0f) / std::max(normalization[0], 1.0e-10f);
+      weights[offset + 1u] = preflashScale * std::max(academyPrinterDensityData()[offset + 1u], 0.0f) / std::max(normalization[1], 1.0e-10f);
+      weights[offset + 2u] = preflashScale * std::max(academyPrinterDensityData()[offset + 2u], 0.0f) / std::max(normalization[2], 1.0e-10f);
+    }
+    return weights;
+  }
+
+  const float cFilter = preflash ? 0.0f : params.filterC;
+  const float mFilter = preflash ? params.preflashMFilterShift : params.filterMShift;
+  const float yFilter = preflash ? params.preflashYFilterShift : params.filterYShift;
+  const float preflashScale = preflash ? std::max(params.preflashExposure, 0.0f) : 1.0f;
+  for (uint32_t wavelength = 0u; wavelength < paperCurves.wavelengthCount; ++wavelength) {
+    const uint32_t offset = wavelength * 3u;
+    const float illuminant = filteredEnlargerIlluminantCpu(wavelength, params, cFilter, mFilter, yFilter);
+    weights[offset] = preflashScale * illuminant * paperSensitivityLinear[offset];
+    weights[offset + 1u] = preflashScale * illuminant * paperSensitivityLinear[offset + 1u];
+    weights[offset + 2u] = preflashScale * illuminant * paperSensitivityLinear[offset + 2u];
+  }
+  return weights;
+}
+
 float interpLinear(const std::vector<float> &x, const float *y, uint32_t channel, float target) {
   if (x.empty()) {
     return 0.0f;
@@ -2539,6 +2687,7 @@ struct MetalRenderer::Impl {
   id<MTLComputePipelineState> frameConstantsPipeline = nil;
   id<MTLComputePipelineState> finalFromFilmDensityPipeline = nil;
   id<MTLComputePipelineState> printRawFromFilmDensityPipeline = nil;
+  id<MTLComputePipelineState> printRawFromNegativeLightPipeline = nil;
   id<MTLComputePipelineState> printDensityFromPrintRawPipeline = nil;
   id<MTLComputePipelineState> profilePrintScanFromDensityPipeline = nil;
   id<MTLComputePipelineState> profileFinalizeOutputPipeline = nil;
@@ -2980,6 +3129,12 @@ struct MetalRenderer::Impl {
     next.cameraUvCutNm = params.cameraUvCutNm;
     next.cameraIrFilterEnabled = params.cameraIrFilterEnabled;
     next.cameraIrCutNm = params.cameraIrCutNm;
+    next.processNegativePrintTiming = params.printTiming;
+    next.processNegativeFilterC = params.filterC;
+    next.processNegativeFilterMShift = params.filterMShift;
+    next.processNegativeFilterYShift = params.filterYShift;
+    next.processNegativePreflashMFilterShift = params.preflashMFilterShift;
+    next.processNegativePreflashYFilterShift = params.preflashYFilterShift;
     next.filmCurves = filmCurves;
     next.paperCurves = paperCurves;
     next.curveInfo = {filmCurves->exposureCount, 0u, 0u, 0u};
@@ -3050,6 +3205,18 @@ struct MetalRenderer::Impl {
     const std::vector<float> baseFilmSensitivityLinear = makeLinearSensitivity(filmCurves->logSensitivity, filmCurves->wavelengthCount);
     const std::vector<float> filmSensitivityLinear = applyCameraBandPass(*filmCurves, baseFilmSensitivityLinear, params);
     const std::vector<float> paperSensitivityLinear = makeLinearSensitivity(paperCurves->logSensitivity, paperCurves->wavelengthCount);
+    const std::vector<float> processNegativePaperWeights = makeProcessNegativePaperWeights(
+      *paperCurves,
+      paperSensitivityLinear,
+      params,
+      false
+    );
+    const std::vector<float> processNegativePreflashWeights = makeProcessNegativePaperWeights(
+      *paperCurves,
+      paperSensitivityLinear,
+      params,
+      true
+    );
     const std::vector<float> filmCurveExposure = makePackedCurveExposure(filmCurves->logExposure, filmCurves->exposureCount);
     const std::vector<float> paperCurveExposure = makePackedCurveExposure(paperCurves->logExposure, paperCurves->exposureCount);
     const std::vector<float> filmSpectralDensity = makePackedSpectralDensity(
@@ -3072,6 +3239,18 @@ struct MetalRenderer::Impl {
       hanatosSpectraData,
       hanatosSpectraLutInfo(),
       params.rgbToRawMethod
+    );
+    const std::vector<float> paperHanatosResponse = makeHanatosResponsePairFromWeights(
+      *filmCurves,
+      processNegativePaperWeights,
+      hanatosSpectraData,
+      hanatosSpectraLutInfo()
+    );
+    const std::vector<float> preflashPaperHanatosResponse = makeHanatosResponsePairFromWeights(
+      *filmCurves,
+      processNegativePreflashWeights,
+      hanatosSpectraData,
+      hanatosSpectraLutInfo()
     );
 
     std::vector<float> paperScanDensityData;
@@ -3119,6 +3298,8 @@ struct MetalRenderer::Impl {
     next.logSensitivityBuffer = newStaticBuffer(filmSensitivityLinear.data(), sensitivityBytes, "film linear sensitivity");
     next.bandpassHanatosBuffer = newStaticBuffer(bandpassHanatosData, sensitivityBytes, "film Hanatos bandpass");
     next.hanatosRawResponseBuffer = newStaticBuffer(hanatosRawResponse.data(), hanatosRawResponse.size() * sizeof(float), "film Hanatos raw response");
+    next.paperHanatosResponseBuffer = newStaticBuffer(paperHanatosResponse.data(), paperHanatosResponse.size() * sizeof(float), "paper Hanatos response");
+    next.preflashPaperHanatosResponseBuffer = newStaticBuffer(preflashPaperHanatosResponse.data(), preflashPaperHanatosResponse.size() * sizeof(float), "preflash paper Hanatos response");
     next.mallettBasisIlluminantBuffer = newStaticBuffer(mallettRawMatrix.data(), mallettRawMatrix.size() * sizeof(float), "film Mallett raw matrix");
     next.inputToReferenceXyzBuffer = newStaticBuffer(filmCurves->inputToReferenceXyz, inputMatrixBytes, "input to reference XYZ");
     next.inputToSrgbBuffer = newStaticBuffer(filmCurves->inputToSrgb, inputMatrixBytes, "input to sRGB");
@@ -3413,6 +3594,7 @@ struct MetalRenderer::Impl {
       frameConstantsPipeline = makePipeline(@"spektrafilm_frame_constants");
       finalFromFilmDensityPipeline = makePipeline(@"spektrafilm_final_from_film_density");
       printRawFromFilmDensityPipeline = makePipeline(@"spektrafilm_print_raw_from_film_density");
+      printRawFromNegativeLightPipeline = makePipeline(@"spektrafilm_print_raw_from_negative_light");
       printDensityFromPrintRawPipeline = makePipeline(@"spektrafilm_print_density_from_print_raw");
       profilePrintScanFromDensityPipeline = makePipeline(@"spektrafilm_profile_print_scan_from_density");
       profileFinalizeOutputPipeline = makePipeline(@"spektrafilm_profile_finalize_output");
@@ -3479,7 +3661,7 @@ struct MetalRenderer::Impl {
           !grainSynthesisLayersFromTargetDensityNonLayeredTextureFixedRadiusPipeline ||
           !grainSynthesisResolveDensityPipeline ||
           !filteredEnlargerResponsePipeline || !frameConstantsPipeline || !finalFromFilmDensityPipeline ||
-          !printRawFromFilmDensityPipeline || !printDensityFromPrintRawPipeline ||
+          !printRawFromFilmDensityPipeline || !printRawFromNegativeLightPipeline || !printDensityFromPrintRawPipeline ||
           !profilePrintScanFromDensityPipeline || !profileFinalizeOutputPipeline || !finalFromPrintRawPipeline ||
           !printGlareGeneratePipeline || !printGlareBlurXPipeline || !printGlareBlurYPipeline ||
           !printGlareApplyPipeline ||
@@ -3586,7 +3768,7 @@ bool MetalRenderer::isAvailable() const {
     impl_->grainSynthesisLayersFromTargetDensityNonLayeredTextureFixedRadiusPipeline &&
     impl_->grainSynthesisResolveDensityPipeline &&
     impl_->filteredEnlargerResponsePipeline && impl_->frameConstantsPipeline &&
-    impl_->finalFromFilmDensityPipeline && impl_->printRawFromFilmDensityPipeline &&
+    impl_->finalFromFilmDensityPipeline && impl_->printRawFromFilmDensityPipeline && impl_->printRawFromNegativeLightPipeline &&
     impl_->printDensityFromPrintRawPipeline && impl_->profilePrintScanFromDensityPipeline &&
     impl_->profileFinalizeOutputPipeline && impl_->finalFromPrintRawPipeline &&
     impl_->scannerBlurXPipeline && impl_->scannerBlurYPipeline &&
@@ -3754,13 +3936,16 @@ bool MetalRenderer::render(
     const bool printDensityOutput = params.renderOutput == RenderOutputMode::PrintDensityCmy;
     const bool printStageOutput = printLogRawOutput || printDensityOutput;
     const bool finalOutput = params.renderOutput == RenderOutputMode::FinalPreview;
-    const bool sceneHandoffOutput = finalOutput && params.outputRole == OutputRole::SceneHandoff;
+    const bool rcmOutput = finalOutput && params.outputRole == OutputRole::Rcm;
     const bool finalPrintSimulation =
-      finalOutput && !sceneHandoffOutput && params.process == ProcessMode::PrintSimulation;
-    const bool printSimulationPath = finalPrintSimulation || printStageOutput;
+      finalOutput && params.process == ProcessMode::PrintSimulation;
     const bool finalScanNegative =
-      finalOutput && (params.process == ProcessMode::ScanNegative || sceneHandoffOutput);
-    const bool finalPostProcessPath = finalPrintSimulation || finalScanNegative;
+      finalOutput && params.process == ProcessMode::ScanNegative;
+    const bool finalProcessNegative =
+      finalOutput && params.process == ProcessMode::ProcessNegative;
+    const bool printLikeFinalPath = finalPrintSimulation || finalProcessNegative;
+    const bool printSimulationPath = finalPrintSimulation || printStageOutput;
+    const bool finalPostProcessPath = finalPrintSimulation || finalScanNegative || finalProcessNegative;
     const bool cameraDiffusionRequested =
       params.cameraDiffusionEnabled &&
       params.cameraDiffusionStrength > 0.0f &&
@@ -3769,7 +3954,7 @@ bool MetalRenderer::render(
       params.printDiffusionEnabled &&
       params.printDiffusionStrength > 0.0f &&
       params.printDiffusionSpatialScale > 0.0f &&
-      printSimulationPath;
+      (printSimulationPath || finalProcessNegative);
     const bool needsFilmDensityPath = densityOutput || densityWithGrainOutput || printStageOutput || finalPrintSimulation || finalScanNegative;
     const bool needsHalationLogRawPath = true;
     const bool halationScatterPath =
@@ -3852,9 +4037,9 @@ bool MetalRenderer::render(
       : std::vector<KernelDiffusionComponent>{};
     const bool cameraDiffusionPath = cameraDiffusionRequested && cameraDiffusionInfo.componentCount > 0u && !cameraDiffusionComponents.empty();
     const bool printDiffusionPath = printDiffusionRequested && printDiffusionInfo.componentCount > 0u && !printDiffusionComponents.empty();
-    const bool sourceTransformPath = enlargerTransformActive(params);
+    const bool sourceTransformPath = !finalProcessNegative && enlargerTransformActive(params);
     const bool preExposurePath =
-      halationBoostPath || cameraDiffusionPath || halationPath || printDiffusionPath || finalPostProcessPath ||
+      halationBoostPath || cameraDiffusionPath || halationPath || (printDiffusionPath && !finalProcessNegative) || finalPrintSimulation || finalScanNegative ||
       densityOutput || densityWithGrainOutput || filmLogRawOutput || printStageOutput;
     const bool directDirBaselinePath = dirPath && !halationBoostPath && !cameraDiffusionPath && !halationPath && !filmLogRawOutput;
     const bool preExposureBranchPath = preExposurePath && !directDirBaselinePath;
@@ -3882,6 +4067,8 @@ bool MetalRenderer::render(
     id<MTLBuffer> logSensitivityBuffer = resources.logSensitivityBuffer;
     id<MTLBuffer> bandpassHanatosBuffer = resources.bandpassHanatosBuffer;
     id<MTLBuffer> hanatosRawResponseBuffer = resources.hanatosRawResponseBuffer;
+    id<MTLBuffer> paperHanatosResponseBuffer = resources.paperHanatosResponseBuffer;
+    id<MTLBuffer> preflashPaperHanatosResponseBuffer = resources.preflashPaperHanatosResponseBuffer;
     id<MTLBuffer> mallettBasisIlluminantBuffer = resources.mallettBasisIlluminantBuffer;
     id<MTLBuffer> inputToReferenceXyzBuffer = resources.inputToReferenceXyzBuffer;
     id<MTLBuffer> inputToSrgbBuffer = resources.inputToSrgbBuffer;
@@ -3980,11 +4167,11 @@ bool MetalRenderer::render(
     id<MTLBuffer> enlargedSourceBuffer = sourceTransformPath ? impl_->gpuScratchBuffer(bufferBytes, "enlarger source") : nil;
 
     const bool printGlarePath =
-      finalPrintSimulation && !sceneHandoffOutput && params.scannerEnabled && params.glarePercent > 0.0f;
+      printLikeFinalPath && !rcmOutput && params.scannerEnabled && params.glarePercent > 0.0f;
     const bool scannerNeedsBlur =
-      finalPostProcessPath && !sceneHandoffOutput && params.scannerEnabled && params.scannerMtf50LpMm > 0.0f;
+      finalPostProcessPath && !rcmOutput && params.scannerEnabled && params.scannerMtf50LpMm > 0.0f;
     const bool scannerNeedsUnsharp =
-      finalPostProcessPath && !sceneHandoffOutput && params.scannerEnabled &&
+      finalPostProcessPath && !rcmOutput && params.scannerEnabled &&
       params.scannerUnsharpRadiusUm > 0.0f && params.scannerUnsharpAmount > 0.0f;
     const bool scannerMpsPath = (impl_->scannerMps || impl_->blurBackend == "mps" ||
       (impl_->blurBackend == "auto" && impl_->useScannerTextures)) && (scannerNeedsBlur || scannerNeedsUnsharp);
@@ -4000,7 +4187,7 @@ bool MetalRenderer::render(
       directFinalEncodePath;
     impl_->diagnostics.finalCoreMode = stagedFinalCorePath ? "staged" : "fused";
     impl_->diagnostics.scannerTextureIntermediates = scannerTexturePath;
-    const bool needsFrameConstants = needsFilmDensityPath || printDiffusionPath;
+    const bool needsFrameConstants = needsFilmDensityPath || printDiffusionPath || finalProcessNegative;
     const NSUInteger filteredEnlargerResponseBytes =
       static_cast<NSUInteger>(filmCurves->wavelengthCount) * 8u * sizeof(float);
     const NSUInteger diffusionTempBytes = bufferBytes * static_cast<NSUInteger>(std::max(impl_->diffusionGroupSize, 1u));
@@ -4020,7 +4207,7 @@ bool MetalRenderer::render(
       ? static_cast<uint32_t>((static_cast<uint64_t>(width) * static_cast<uint64_t>(height) +
           kHalationBoostMaxChunkPixels - 1u) / kHalationBoostMaxChunkPixels)
       : 0u;
-    id<MTLBuffer> frameConstantsBuffer = needsFrameConstants ? impl_->gpuScratchBuffer(sizeof(float) * 16u, "frame constants") : nil;
+    id<MTLBuffer> frameConstantsBuffer = needsFrameConstants ? impl_->gpuScratchBuffer(sizeof(float) * 24u, "frame constants") : nil;
     id<MTLBuffer> filteredEnlargerResponseBuffer = printSimulationPath
       ? impl_->gpuScratchBuffer(filteredEnlargerResponseBytes, "filtered enlarger response")
       : nil;
@@ -4064,7 +4251,7 @@ bool MetalRenderer::render(
     id<MTLBuffer> diffusionDownsampleBlurBuffer = diffusionDownsamplePath
       ? impl_->gpuScratchBuffer(diffusionDownsampleGroupBytes, "diffusion downsample blur")
       : nil;
-    id<MTLBuffer> printRawBufferA = (printDiffusionPath || printStageOutput || stagedFinalCorePath)
+    id<MTLBuffer> printRawBufferA = (printDiffusionPath || printStageOutput || stagedFinalCorePath || finalProcessNegative)
       ? impl_->gpuScratchBuffer(bufferBytes, "print raw A")
       : nil;
     id<MTLBuffer> printRawBufferB = (printDiffusionPath || stagedFinalCorePath)
@@ -4178,7 +4365,7 @@ bool MetalRenderer::render(
       impl_->lastError = "Unable to allocate downsampled diffusion Metal buffers.";
       return false;
     }
-    if ((printDiffusionPath || printStageOutput) && !printRawBufferA) {
+    if ((printDiffusionPath || printStageOutput || finalProcessNegative) && !printRawBufferA) {
       impl_->lastError = "Unable to allocate print stage Metal buffers.";
       return false;
     }
@@ -4687,7 +4874,7 @@ bool MetalRenderer::render(
       [encoder setBuffer:paperScanDensityDataBuffer offset:0 atIndex:22];
       [encoder setBuffer:scanIlluminantsAndCmfsBuffer offset:0 atIndex:23];
       [encoder setBuffer:scanToOutputRgbDataBuffer offset:0 atIndex:24];
-      dispatch1D(impl_->frameConstantsPipeline, 1u, sizeof(float) * 16u);
+      dispatch1D(impl_->frameConstantsPipeline, 1u, sizeof(float) * 24u);
     }
 
     auto encodePrintGlare = [&](id<MTLBuffer> linearRgbBuffer) -> id<MTLBuffer> {
@@ -5570,6 +5757,23 @@ bool MetalRenderer::render(
       dispatch2D(impl_->printRawFromFilmDensityPipeline);
     };
 
+    auto encodePrintRawFromNegativeLight = [&](id<MTLBuffer> sourceBuffer, id<MTLBuffer> printRawBuffer) {
+      [encoder setComputePipelineState:impl_->printRawFromNegativeLightPipeline];
+      [encoder setBuffer:sourceBuffer offset:0 atIndex:0];
+      [encoder setBuffer:printRawBuffer offset:0 atIndex:1];
+      [encoder setBuffer:paramBuffer offset:0 atIndex:2];
+      [encoder setBytes:dims length:sizeof(dims) atIndex:3];
+      [encoder setBuffer:spectralInfoBuffer offset:0 atIndex:4];
+      [encoder setBuffer:colorInfoBuffer offset:0 atIndex:5];
+      [encoder setBuffer:colorDecodeLutBuffer offset:0 atIndex:6];
+      [encoder setBuffer:colorTransferKindBuffer offset:0 atIndex:7];
+      [encoder setBuffer:inputToReferenceXyzBuffer offset:0 atIndex:8];
+      [encoder setBuffer:paperHanatosResponseBuffer offset:0 atIndex:9];
+      [encoder setBuffer:preflashPaperHanatosResponseBuffer offset:0 atIndex:10];
+      [encoder setBuffer:academyPrinterDensityDataBuffer offset:0 atIndex:11];
+      dispatch2D(impl_->printRawFromNegativeLightPipeline);
+    };
+
     auto encodePrintDensityFromPrintRaw = [&](id<MTLBuffer> printRawBuffer, id<MTLBuffer> destinationBuffer) {
       [encoder setComputePipelineState:impl_->printDensityFromPrintRawPipeline];
       [encoder setBuffer:printRawBuffer offset:0 atIndex:0];
@@ -5647,6 +5851,20 @@ bool MetalRenderer::render(
       encodePrintStageOutputFromRaw(printRawBufferB);
     };
 
+    auto encodePrintDiffusionFromNegativeLight = [&]() {
+      encodePrintRawFromNegativeLight(renderSourceBuffer, printRawBufferA);
+      encodeDiffusion(
+        printRawBufferA,
+        printRawBufferB,
+        printRawBufferB,
+        printRawBufferC,
+        printDiffusionInfoBuffer,
+        printDiffusionComponentsBuffer,
+        printDiffusionComponents
+      );
+      encodeFinalFromPrintRaw(printRawBufferB);
+    };
+
     auto encodeFinalFilmDensityOrPrintDiffusion = [&](id<MTLBuffer> filmDensityBuffer) {
       if (densityOutput || densityWithGrainOutput) {
         encodeCopyBufferToDestination(filmDensityBuffer);
@@ -5662,7 +5880,14 @@ bool MetalRenderer::render(
       }
     };
 
-    if (preExposureBranchPath) {
+    if (finalProcessNegative) {
+      if (printDiffusionPath) {
+        encodePrintDiffusionFromNegativeLight();
+      } else {
+        encodePrintRawFromNegativeLight(renderSourceBuffer, printRawBufferA);
+        encodeFinalFromPrintRaw(printRawBufferA);
+      }
+    } else if (preExposureBranchPath) {
       [encoder setComputePipelineState:impl_->halationRawExposurePipeline];
       [encoder setBuffer:renderSourceBuffer offset:0 atIndex:0];
       [encoder setBuffer:halationRawBufferA offset:0 atIndex:1];
@@ -5954,7 +6179,7 @@ bool MetalRenderer::render(
       }
     }
 
-    if ((dirPath || preExposurePath) && !productionGrainPath && !grainSynthesisPath) {
+    if (finalProcessNegative || ((dirPath || preExposurePath) && !productionGrainPath && !grainSynthesisPath)) {
       // Final output was encoded by the precomputed film-density branch.
     } else if (productionGrainPath) {
       if (!dirPath && !preExposurePath) {
