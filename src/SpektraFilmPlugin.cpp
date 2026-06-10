@@ -4930,9 +4930,9 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
   defineGroup(paramSet, "infoGroup", tr("group.info"), false);
   defineGroup(paramSet, "manageGroup", tr("group.manage"), false);
 
-  const char *processOptions[] = {tr("choice.process.printSimulation"), "Scan negative", "Process negative"};
+  const char *processOptions[] = {tr("choice.process.printSimulation"), tr("choice.process.scanNegative"), tr("choice.process.processNegative")};
   defineChoice(paramSet, "process", tr("param.process"), processOptions, 3, 0, "colorGroup");
-  defineBool(paramSet, "scanNegativeInvert", "Invert Negative Scan", false, "colorGroup");
+  defineBool(paramSet, "scanNegativeInvert", tr("param.scanNegativeInvert"), false, "colorGroup");
   const char *rgbToRawOptions[] = {tr("choice.rgbToRaw.hanatos2026"), tr("choice.rgbToRaw.hanatos2025"), tr("choice.rgbToRaw.mallett2019")};
   defineChoice(paramSet, "rgbToRawMethod", tr("param.rgbToRawMethod"), rgbToRawOptions, 3, 0, "filmGroup");
   const char *colorSpaces[] = {
@@ -4996,8 +4996,8 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
     "Rec.709 Gamma 2.4"
   };
   defineChoice(paramSet, "inputColorSpace", tr("param.inputColorSpace"), colorSpaces, static_cast<int>(sizeof(colorSpaces) / sizeof(colorSpaces[0])), 0, "colorGroup");
-  defineChoice(paramSet, "rcmInputColorSpace", "Input Color Space", rcmInputColorSpaces, static_cast<int>(sizeof(rcmInputColorSpaces) / sizeof(rcmInputColorSpaces[0])), 0, "colorGroup");
-  const char *outputRoles[] = {tr("choice.outputRole.displaySdr"), tr("choice.outputRole.displayHdr"), "RCM/ACES (Beta)"};
+  defineChoice(paramSet, "rcmInputColorSpace", tr("param.inputColorSpace"), rcmInputColorSpaces, static_cast<int>(sizeof(rcmInputColorSpaces) / sizeof(rcmInputColorSpaces[0])), 0, "colorGroup");
+  const char *outputRoles[] = {tr("choice.outputRole.displaySdr"), tr("choice.outputRole.displayHdr"), tr("choice.outputRole.rcmAces")};
   defineChoice(paramSet, "outputRole", tr("param.outputRole"), outputRoles, outputRoleOptionCountForFlavor(), 0, "colorGroup");
   defineChoice(paramSet, "sdrOutputColorSpace", tr("param.sdrOutputColorSpace"), sdrOutputColorSpaces, static_cast<int>(sizeof(sdrOutputColorSpaces) / sizeof(sdrOutputColorSpaces[0])), 8, "colorGroup");
   defineChoice(paramSet, "sceneOutputColorSpace", tr("param.sceneOutputColorSpace"), sceneOutputColorSpaces, static_cast<int>(sizeof(sceneOutputColorSpaces) / sizeof(sceneOutputColorSpaces[0])), 0, "colorGroup");
@@ -5176,7 +5176,7 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
   defineChoice(paramSet, "lutDestination", tr("param.lutDestination"), lutDestinations, 5, 0, "manageGroup");
   defineSingleLineString(paramSet, "lutIdentifier", tr("param.lutIdentifier"), "spektrafilm", "manageGroup");
   definePushButton(paramSet, "exportLut", tr("param.exportLut"), "manageGroup");
-  defineSingleLineString(paramSet, "presetName", "Preset Name", "spektrafilm_preset", "manageGroup");
+  defineSingleLineString(paramSet, "presetName", tr("param.presetName"), "spektrafilm_preset", "manageGroup");
   const std::vector<PresetEntry> presetEntries = listPresetEntries();
   const std::vector<std::string> presetLabels = presetChoiceLabels(presetEntries);
   std::vector<const char *> presetLabelPointers;
@@ -5184,9 +5184,9 @@ OfxStatus describeInContext(OfxImageEffectHandle effect, OfxPropertySetHandle) {
   for (const std::string &label : presetLabels) {
     presetLabelPointers.push_back(label.c_str());
   }
-  defineChoice(paramSet, "presetSelection", "Preset", presetLabelPointers.data(), static_cast<int>(presetLabelPointers.size()), 0, "manageGroup");
-  definePushButton(paramSet, "savePreset", "Save Preset", "manageGroup");
-  definePushButton(paramSet, "loadPreset", "Load Preset", "manageGroup");
+  defineChoice(paramSet, "presetSelection", tr("param.presetSelection"), presetLabelPointers.data(), static_cast<int>(presetLabelPointers.size()), 0, "manageGroup");
+  definePushButton(paramSet, "savePreset", tr("param.savePreset"), "manageGroup");
+  definePushButton(paramSet, "loadPreset", tr("param.loadPreset"), "manageGroup");
   definePushButton(paramSet, "copyParams", tr("param.copyParams"), "manageGroup");
   definePushButton(paramSet, "pasteParams", tr("param.pasteParams"), "manageGroup");
   definePushButton(paramSet, "saveDefaults", tr("param.saveDefaults"), "manageGroup");
