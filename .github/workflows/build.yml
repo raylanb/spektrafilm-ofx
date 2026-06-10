@@ -109,7 +109,7 @@ jobs:
             for platform in macos windows linux; do
               dir="artifacts/${plugin}-${platform}"
               if [ -d "$dir" ]; then
-                (cd "$dir" && zip -r "../../${plugin}-${platform}.zip" .)
+                (cd artifacts && mv "${plugin}-${platform}" "${plugin}.ofx.bundle" && zip -r "../${plugin}-${platform}.zip" "${plugin}.ofx.bundle" && mv "${plugin}.ofx.bundle" "${plugin}-${platform}")
                 echo "Created ${plugin}-${platform}.zip"
               fi
             done
